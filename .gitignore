@@ -1,0 +1,32 @@
+# --- Python 通用 ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+*.ipynb # 若不想版控 .ipynb
+
+# --- 虛擬環境 ---
+.venv/
+venv/
+ENV/
+
+# --- 作業系統 / 編輯器 ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Secrets / Token ---
+.env
+.cache/
+*.key
+*.pem
+
+# --- 資料、衍生檔 ---
+data/raw/
+# 若 processed 也會很大，可加上（必要時移除）
+data/processed/
+
+# --- 日誌 ---
+logs/
+*.log
