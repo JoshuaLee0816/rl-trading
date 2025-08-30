@@ -15,3 +15,23 @@ def add_moving_averages(df: pd.DataFrame, windows=[5, 20, 34, 60]) -> pd.DataFra
                 df[col].rolling(w).mean().ffill().bfill()
             )
     return out
+
+def _wilder_rsi(close: pd.Series, window: int = 14) -> pd.Series:
+    """Wilder's RSI (EMA 平滑)。前 window 天為 NaN。"""
+    delta = close.diff()
+    up = delta.clip(lower=0.0)
+    down = (-delta).clip(lower=0.0)
+    roll_up = up.ewm(alpha=1/window, adjust=False, min_periods=window).mean()
+    roll_dn = down.ewm(alpha=1/window, adjust=False, min_periods=window).mean()
+    rs = roll_up / roll_dn
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    return rsi
+
+
+def add_rsi(df_wide: pd.DataFrame, window: int = 14) -> pd.DataFrame:
+    """對寬表每檔 <sid>_close 產生 <sid>_rsi{window} 欄。"""
+    out = df_wide.copy()
+    sids = sorted({c.split("_")[0] for c in out.columns if c.endswith("_close")})
+    for sid in sids:
+        out[f"{sid}_rsi{window}"] = _wilder_rsi(out[f"{sid}_close"], window=window)
+    return out

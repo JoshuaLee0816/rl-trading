@@ -3,55 +3,65 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import pandas as pd
+import time
+from collections import deque
 from pathlib import Path
 from typing import List, Optional
 
-import pandas as pd
-import requests
-
-# 專案根目錄 & 匯入 config
+# 匯入 config (settings.py)
 PROJ_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(PROJ_ROOT / "src"))
 import config.settings as cfg  # type: ignore
 
-# 若 settings 沒載 .env，這裡再保險載一次
-try:
-    from dotenv import load_dotenv  # type: ignore
-    load_dotenv()
-except Exception:
-    pass
-
-# ----------------------------
-# 預設參數
-# ----------------------------
 DATA_RAW = getattr(cfg, "DATA_RAW", PROJ_ROOT / "data" / "raw")
-DEFAULT_START = getattr(cfg, "DEFAULT_START", "2022-01-01")
-DEFAULT_END = getattr(cfg, "DEFAULT_END", "2025-12-31")
-UNIVERSE = getattr(cfg, "UNIVERSE", ["2330"])
+DEFAULT_START = getattr(cfg, "DEFAULT_START")
+DEFAULT_END = getattr(cfg, "DEFAULT_END")
+UNIVERSE = getattr(cfg, "UNIVERSE")
 
-# ----------------------------
-# 用帳密向 API 取得 token
-# ----------------------------
-def _get_token_via_login(user: str, password: str) -> str:
-    url = "https://api.finmindtrade.com/api/v4/login"
-    resp = requests.post(url, data={"user_id": user, "password": password}, timeout=20)
-    resp.raise_for_status()
-    j = resp.json()
-    if j.get("status") != 200 or "token" not in j:
-        raise RuntimeError(f"FinMind login failed: {j}")
-    return j["token"]
+#------RateLimiter------ same as build_twse_universe.py did
+MAX_CALLS_PER_HOUR = 580
+WINDOW_SECONDS = 3600.0
 
-def _login_loader(user: str, password: str):
-    """以帳密換 token，然後用 token 登入 DataLoader。"""
-    from FinMind.data import DataLoader  # 延遲載入
-    token = _get_token_via_login(user, password)
+class _RateLimiter:
+    def __init__(self, max_calls: int, period: float):
+        self.max_calls = int(max_calls)
+        self.period = float(period)
+        self._ts = deque()
+
+    def acquire(self):
+        while True:
+            now = time.time()
+            while self._ts and (now - self._ts[0] >= self.period):
+                self._ts.popleft()
+            if len(self._ts) < self.max_calls:
+                self._ts.append(now)
+                return
+            wait = self.period - (now - self._ts[0]) + 0.01
+            time.sleep(max(0.01, min(wait, 5.0)))
+
+_limiter = _RateLimiter(MAX_CALLS_PER_HOUR, WINDOW_SECONDS)
+
+def login_loader(user: str, password: str):
+    from FinMind.data import DataLoader
+    _limiter.acquire()
     dl = DataLoader()
-    dl.login_by_token(api_token=token)
+    dl.login(user, password)
     return dl
 
-# ----------------------------
+def _dl_daily(dl, stock_id: str, start: str, end: str):
+    _limiter.acquire()
+    if hasattr(dl, "taiwan_stock_price"):
+        return dl.taiwan_stock_price(stock_id=stock_id, start_date=start, end_date=end)
+    return dl.taiwan_stock_daily(stock_id=stock_id, start_date=start, end_date=end)
+
+def _dl_dividend(dl, stock_id: str, start: str, end: str):
+    _limiter.acquire()
+    return dl.taiwan_stock_dividend(stock_id=stock_id, start_date=start, end_date=end)
+
+
+
 # 欄位對齊
-# ----------------------------
 def _unify_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     rename_map = {
         "Date": "date", "date": "date",
@@ -103,7 +113,7 @@ def fetch_universe(
         raise RuntimeError("請在 .env 設定 FINMIND_USER / FINMIND_PASSWORD")
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    dl = _login_loader(user, password)  # 只登入一次
+    dl = login_loader(user, password)  # 只登入一次
 
     from data.io_utils import save_csv  # 延遲載入避免循環匯入
 
@@ -111,7 +121,7 @@ def fetch_universe(
         print(f"[INFO] fetching {sid} {start}~{end}")
 
         # 1) 日價
-        px = dl.taiwan_stock_daily(stock_id=sid, start_date=start, end_date=end)
+        px = _dl_daily(dl, sid, start, end)
         px = _unify_ohlcv(px)
         if px.empty:
             print(f"[WARN] {sid} price empty, skip.")
@@ -119,9 +129,7 @@ def fetch_universe(
 
         # 2) 股利
         try:
-            dv = dl.taiwan_stock_dividend(stock_id=sid, start_date=start, end_date=end)
-            #print("[DEBUG] dividend columns:", dv.columns)
-            #print(dv.head())
+            dv = _dl_dividend(dl, sid, start, end)
             dv = _unify_dividend(dv)
         except Exception as e:
             print(f"[WARN] dividend fetch failed for {sid}: {e}")
@@ -147,9 +155,8 @@ def fetch_universe(
         save_csv(out, out_dir / f"{sid}.csv")
         print(f"[OK] saved -> {out_dir / (sid + '.csv')} (rows={len(out)})")
 
-# ----------------------------
+
 # CLI 參數
-# ----------------------------
 def _parse_args():
     p = argparse.ArgumentParser(description="Fetch multiple TW stocks (OHLCV + dividends) into data/raw/ via login.")
     p.add_argument("--tickers", nargs="*", default=None, help="e.g. 2330 2317 2454; default uses settings.UNIVERSE")

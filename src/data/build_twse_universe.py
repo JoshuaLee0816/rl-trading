@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 TWSE stock universe builder (with rate limiting 600 req/hour)
 - Window: 2015-01-01 ~ 2024-12-31
@@ -120,10 +118,6 @@ def finmind_stock_info(dl) -> pd.DataFrame:
 
 
 def finmind_daily(dl, stock_id: str, start: str, end: str) -> pd.DataFrame:
-    """Get daily OHLCV with rate limiting.
-    - 優先使用 taiwan_stock_price（你的 log 顯示 Dataset.TaiwanStockPrice）
-    - 若該方法不存在，改用 taiwan_stock_daily（不同版本介面，未查證）
-    """
     limiter.acquire()
     if hasattr(dl, "taiwan_stock_price"):
         return dl.taiwan_stock_price(stock_id=stock_id, start_date=start, end_date=end)
