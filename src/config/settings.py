@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+
 load_dotenv()
 
 PROJ_ROOT = Path(__file__).resolve().parents[2]

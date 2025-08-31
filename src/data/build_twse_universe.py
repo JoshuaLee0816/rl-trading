@@ -34,13 +34,12 @@ WINDOW_SECONDS = 3600.0
 BATCH = 20
 SLEEP_SEC = 0.0  # 不額外延遲，由 RateLimiter 控制節流
 
-# 非普通股（以 industry_category 排除；保守清單，未查證）
+# 非普通股
 EXCLUDE_INDUSTRY = {
     "ETF", "ETN", "受益證券", "受益憑證", "特別股", "存託憑證", "DR",
     "權證", "認購權證", "認售權證", "指數投資證券", "不動產投資信託", "石油基金",
 }
 
-# 日線必備欄位（依常見 FinMind 欄位名推定；未查證）
 REQUIRED_COLS = {"open", "max", "min", "close", "Trading_Volume"}
 
 
@@ -54,10 +53,7 @@ def require_packages():
     try:
         import xlsxwriter  # noqa
     except Exception:
-        # 無 xlsxwriter 仍可輸出 xlsx（用 openpyxl），只是沒格式
         pass
-
-# 嘗試自動載入 .env（根目錄 / 腳本目錄 / 上層）
 try:
     from dotenv import load_dotenv, find_dotenv
     ok = load_dotenv(find_dotenv(usecwd=True), override=False)
@@ -128,7 +124,7 @@ def finmind_daily(dl, stock_id: str, start: str, end: str) -> pd.DataFrame:
 
 # -------------- core logic --------------
 def load_twse_common_info(dl) -> pd.DataFrame:
-    """僅留上市主板普通股（type=='twse' 且排除 EXCLUDE_INDUSTRY）"""
+    """僅留上市普通股（type=='twse' 且排除 EXCLUDE_INDUSTRY）"""
     info = finmind_stock_info(dl)
     info = info[info["type"].str.lower() == "twse"].copy()
     info = info[~info["industry_category"].isin(EXCLUDE_INDUSTRY)].copy()
@@ -150,7 +146,7 @@ def iter_chunks(seq: Iterable, n: int):
 
 
 def get_proxy_trading_days(dl, start: str, end: str, proxy_id: str = PROXY_STOCK_ID) -> pd.DatetimeIndex:
-    """以 2330 日線日期為交易日 proxy（工程性假設，未查證）"""
+    """以 2330 日線日期為交易日 proxy"""
     df = finmind_daily(dl, proxy_id, start, end)
     if df.empty:
         raise RuntimeError(f"代理標的 {proxy_id} 在 {start}~{end} 無資料，無法推導交易日。")
@@ -162,7 +158,6 @@ def get_proxy_trading_days(dl, start: str, end: str, proxy_id: str = PROXY_STOCK
 
 
 def coverage_ratio_vs_proxy(dl, stock_id: str, start: str, end: str, proxy_days: pd.DatetimeIndex) -> float:
-    """覆蓋率 = (該股在 proxy 交易日集合上的有效列數) / (proxy 交易日總數)"""
     df = finmind_daily(dl, stock_id, start, end)
     if df.empty or proxy_days.empty:
         return 0.0
@@ -181,7 +176,6 @@ def compute_universe(dl,
                      limit: int | None = None,
                      sleep_sec: float = SLEEP_SEC) -> Tuple[pd.DataFrame, pd.DataFrame]:
     info = load_twse_common_info(dl)
-    # 你說總共 1239 筆（此處不強制，僅記錄；未查證）
     if limit:
         info = info.head(int(limit)).copy()
 
@@ -196,7 +190,6 @@ def compute_universe(dl,
             try:
                 cov = coverage_ratio_vs_proxy(dl, sid, start, end, proxy_days)
             except Exception as e:
-                # 單檔失敗時以 0 視之並繼續
                 cov = 0.0
                 print(f"[WARN] {sid} 覆蓋率計算失敗：{e}")
             r = info.loc[info["stock_id"] == sid].iloc[0]
@@ -214,7 +207,6 @@ def compute_universe(dl,
 
 # -------------- output --------------
 def save_to_excel(universe: pd.DataFrame, meta: pd.DataFrame, outpath: Path, title: str):
-    """輸出 XLSX（含標題與格式）；若無 xlsxwriter 則退回簡易版。"""
     outpath.parent.mkdir(parents=True, exist_ok=True)
     try:
         with pd.ExcelWriter(outpath, engine="xlsxwriter") as writer:
@@ -252,7 +244,6 @@ def save_to_excel(universe: pd.DataFrame, meta: pd.DataFrame, outpath: Path, tit
     except Exception:
         pass
 
-    # 簡易版
     with pd.ExcelWriter(outpath) as writer:
         universe.merge(meta[["stock_id", "stock_name"]], on="stock_id", how="left") \
                 .to_excel(writer, "Universe", index=False)
@@ -268,7 +259,7 @@ def main():
         start=START_DATE,
         end=END_DATE,
         min_coverage=COVERAGE_THRESHOLD,
-        limit=None,         # 你可先設 50/100 做小批測試
+        limit=None,         
         sleep_sec=SLEEP_SEC
     )
 
