@@ -1,18 +1,29 @@
 # src/rl/train/test.py
-import sys
+import sys, importlib
 import yaml
 import matplotlib.pyplot as plt
 from pathlib import Path
 import pandas as pd
 import datetime
 
+# === 設定專案路徑 ===
 HERE = Path(__file__).resolve()
 SRC_DIR = HERE.parents[2]          # .../RL_Trading/src
 ROOT = HERE.parents[3]             # .../RL_Trading
-sys.path.append(str(SRC_DIR))
+# 確保 src 是 sys.path[0]
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+# === 匯入模組 ===
+from rl.models.random_agent import RandomAgent
+from rl.models.dqn_agent import DQNAgent
+from rl.models.ppo_agent import PPOAgent
+from rl.models.a2c_agent import A2CAgent
 
 from rl.env.StockTradingEnv import StockTradingEnv
-from rl.train.logger import RunLogger   # 若你放同檔，改成: from logger import RunLogger
+from rl.train.logger import RunLogger
+
+
 
 if __name__ == "__main__":
     # 讀取 config.yaml
@@ -21,6 +32,7 @@ if __name__ == "__main__":
 
     n_episodes = config["training"]["n_episodes"]
     save_freq  = config["training"]["save_freq"]
+    model_name = config["training"].get("model", "random").lower()
 
     init_cash  = config["environment"]["initial_cash"]
     lookback   = config["environment"]["lookback"]
@@ -48,6 +60,27 @@ if __name__ == "__main__":
         action_mode=action_mode
     )
 
+    # 初始化 agent
+    obs_dim = env.observation_space.shape[0]
+    if hasattr(env.action_space, "n"):
+        action_dim = env.action_space.n
+    elif hasattr(env.action_space, "nvec"):
+        action_dim = int(env.action_space.nvec.prod())
+    else:
+        raise ValueError("Unsupported action_space type")
+
+    if model_name == "random":
+        agent = RandomAgent(env.action_space)
+    elif model_name == "dqn":
+        agent = DQNAgent(obs_dim, action_dim, config["dqn"])
+    elif model_name == "ppo":
+        agent = PPOAgent(obs_dim, action_dim, config.get("ppo", {}))
+    elif model_name == "a2c":
+        agent = A2CAgent(obs_dim, action_dim, config.get("a2c", {}))
+    else:
+        raise ValueError(f"Unknown model: {model_name}")
+
+    # 訓練迴圈
     all_rewards = []
     summary = []
     logger = RunLogger(outdir)
@@ -57,10 +90,17 @@ if __name__ == "__main__":
         ep_reward = 0.0
 
         while True:
-            action = env.action_space.sample()  # baseline: 隨機動作
-            obs, r, done, trunc, info = env.step(action)
-            ep_reward += r
+            # 用 agent 選擇動作
+            action = agent.select_action(obs)
+            next_obs, r, done, trunc, info = env.step(action)
 
+            # 只在非 random 模型時存經驗 & 更新
+            if model_name != "random":
+                agent.store_transition(obs, action, r, next_obs, done)
+                agent.update()
+
+            obs = next_obs
+            ep_reward += r
             logger.log_step(ep, info)
 
             if done or trunc:
@@ -76,7 +116,7 @@ if __name__ == "__main__":
             plt.plot(range(1, len(all_rewards)+1), all_rewards, marker="o")
             plt.xlabel("Episode")
             plt.ylabel("Total Reward")
-            plt.title("Training Progress")
+            plt.title(f"Training Progress ({model_name})")
             plt.grid(True)
             plt.tight_layout()
             plt.savefig(outdir / "reward_curve.png")
@@ -85,4 +125,4 @@ if __name__ == "__main__":
     if config["logging"]["save_summary"]:
         pd.DataFrame(summary).to_csv(outdir / "summary.csv", index=False)
 
-    print(f"✅ Training finished. Results saved in: {outdir}")
+    print(f"✅ Training finished. Model={model_name}. Results saved in: {outdir}")

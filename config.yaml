@@ -1,7 +1,8 @@
 training:
-  n_episodes: 20                           # 總訓練集數
+  n_episodes: 10                           # 總訓練集數
   save_freq: 10                             # 每幾集更新一次 reward_curve.png
   seed: 42                                  # 隨機種子，方便重現結果
+  model: "Random"                           # Random, DQN, PPO, A2C...
 
 environment:
   initial_cash: 1000000                       # 初始資金
@@ -15,3 +16,13 @@ logging:
   save_summary: true                          # 是否存 summary.csv
   save_trades: true                           # 是否存 trades_all.csv
   trade_sample_freq: 10                       # 每幾筆交易存一次（logger 控制）
+
+DQN:
+  gamma: 0.99
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay: 10000
+  lr: 0.0005
+  batch_size: 64
+  memory_size: 100000
+  target_update_freq: 1000

@@ -271,7 +271,6 @@ class StockTradingEnv(gym.Env):
                     exec_shares = -sell_shares
                     gross_cash  = gross
                     fees_tax    = fee + tax
-                print(f"[DEBUG] idx={idx}, stock_id={self.ids[idx]}, shares={self.shares[idx]}")
 
 
         # --- 收盤估值 & Reward = Total Profit ---
