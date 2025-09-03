@@ -1,7 +1,10 @@
 # src/rl/train/test.py
 import sys
+import yaml
+import matplotlib.pyplot as plt
 from pathlib import Path
 import pandas as pd
+import datetime
 
 HERE = Path(__file__).resolve()
 SRC_DIR = HERE.parents[2]          # .../RL_Trading/src
@@ -12,42 +15,74 @@ from rl.env.StockTradingEnv import StockTradingEnv
 from rl.train.logger import RunLogger   # 若你放同檔，改成: from logger import RunLogger
 
 if __name__ == "__main__":
-    csv_path = ROOT / "data" / "processed" / "training_data.csv"
-    outdir = ROOT / "logs" / "runs"     # 統一輸出資料夾
+    # 讀取 config.yaml
+    with open(ROOT / "config.yaml", "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
 
+    n_episodes = config["training"]["n_episodes"]
+    save_freq  = config["training"]["save_freq"]
+
+    init_cash  = config["environment"]["initial_cash"]
+    lookback   = config["environment"]["lookback"]
+    reward_mode = config["environment"]["reward_mode"]
+    action_mode = config["environment"]["action_mode"]
+
+    outdir = ROOT / config["logging"]["outdir"]
+    run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    outdir = outdir / f"run_{run_id}"
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    # 存一份 config 到 run 資料夾，方便追蹤
+    with open(outdir / "config.yaml", "w") as f:
+        yaml.dump(config, f)
+
+    # 載入資料
+    csv_path = ROOT / "data" / "processed" / "training_data.csv"
     df = pd.read_csv(csv_path, parse_dates=["date"])
     ids = sorted(df["stock_id"].unique())[:20]
 
+    # 建立環境
     env = StockTradingEnv(
-        df=df, stock_ids=ids, lookback=20,
-        initial_cash=1_000_000, reward_mode="daily_return"
+        df=df, stock_ids=ids, lookback=lookback,
+        initial_cash=init_cash, reward_mode=reward_mode,
+        action_mode=action_mode
     )
 
-    n_episodes = 3
+    all_rewards = []
+    summary = []
+    logger = RunLogger(outdir)
+
     for ep in range(1, n_episodes + 1):
-        logger = RunLogger(outdir)
         obs, info = env.reset()
-        steps, ep_reward = 0, 0.0
+        ep_reward = 0.0
 
         while True:
-            action = env.action_space.sample()
+            action = env.action_space.sample()  # baseline: 隨機動作
             obs, r, done, trunc, info = env.step(action)
             ep_reward += r
-            steps += 1
 
-            # 記錄每步
-            logger.log_step(ep, steps, r, info)
+            logger.log_step(ep, info)
 
             if done or trunc:
                 break
 
         final_V = info["V"]
-        init_V = env.initial_cash
-        ret_pct = (final_V - init_V) / init_V * 100
+        ret_pct = (final_V - init_cash) / init_cash * 100
+        all_rewards.append(ep_reward)
+        summary.append({"episode": ep, "reward": ep_reward, "return_pct": ret_pct})
 
-        # 存檔（tag 可以用 ep 編號或日期時間）
-        eq_path, tr_path = logger.save_csv(tag=f"ep{ep:03d}")
+        if ep % save_freq == 0:
+            plt.figure(figsize=(8, 4))
+            plt.plot(range(1, len(all_rewards)+1), all_rewards, marker="o")
+            plt.xlabel("Episode")
+            plt.ylabel("Total Reward")
+            plt.title("Training Progress")
+            plt.grid(True)
+            plt.tight_layout()
+            plt.savefig(outdir / "reward_curve.png")
+            plt.close()
 
-        print(f"[Episode {ep}] steps={steps}, final_V={final_V}, return={ret_pct:+.2f}%")
-        print(f"  ↳ equity curve: {eq_path}")
-        print(f"  ↳ trades     : {tr_path}")
+    if config["logging"]["save_summary"]:
+        pd.DataFrame(summary).to_csv(outdir / "summary.csv", index=False)
+
+    print(f"✅ Training finished. Results saved in: {outdir}")

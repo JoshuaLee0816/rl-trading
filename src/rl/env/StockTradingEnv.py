@@ -250,23 +250,29 @@ class StockTradingEnv(gym.Env):
                     gross_cash  = -gross
                     fees_tax    = fee
 
-        elif delta_val < -1e-9 and p > 0 and self.shares[idx] > 0:
-            # -------- SELL --------
-            hold = int(self.shares[idx])
-            need_sell = int((-delta_val) // p)
-            raw_sell = min(hold, need_sell)
-            sell_shares = self._apply_lot_rules(raw_sell)
+        elif delta_val < -1e-9 and p > 0:
+            if self.shares[idx] <= 0:
+                # ⚠️ 沒持股卻要賣 → 當 HOLD 處理
+                exec_shares, gross_cash, fees_tax = 0, 0, 0
+            else:
+                # -------- SELL --------
+                hold = int(self.shares[idx])
+                need_sell = int((-delta_val) // p)
+                raw_sell = min(hold, need_sell)
+                sell_shares = self._apply_lot_rules(raw_sell)
 
-            if sell_shares > 0:
-                gross = self._round_currency(sell_shares * p)
-                fee   = self._round_currency(gross * self.fee_sell)
-                tax   = self._round_currency(gross * self.tax_sell)
-                cash_in = gross - fee - tax
-                self.shares[idx] -= sell_shares
-                self.cash        += cash_in
-                exec_shares = -sell_shares
-                gross_cash  = gross
-                fees_tax    = fee + tax
+                if sell_shares > 0:
+                    gross = self._round_currency(sell_shares * p)
+                    fee   = self._round_currency(gross * self.fee_sell)
+                    tax   = self._round_currency(gross * self.tax_sell)
+                    cash_in = gross - fee - tax
+                    self.shares[idx] -= sell_shares
+                    self.cash        += cash_in
+                    exec_shares = -sell_shares
+                    gross_cash  = gross
+                    fees_tax    = fee + tax
+                print(f"[DEBUG] idx={idx}, stock_id={self.ids[idx]}, shares={self.shares[idx]}")
+
 
         # --- 收盤估值 & Reward = Total Profit ---
         prices_close = self._prices(self._t + 1, kind="close")
