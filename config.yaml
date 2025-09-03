@@ -1,11 +1,11 @@
 training:
-  n_episodes: 10                           # 總訓練集數
-  save_freq: 10                             # 每幾集更新一次 reward_curve.png
+  n_episodes: 3                           # 總訓練集數
+  save_freq: 1                             # 每幾集更新一次 reward_curve.png
   seed: 42                                  # 隨機種子，方便重現結果
-  model: "Random"                           # Random, DQN, PPO, A2C...
+  model: "dqn"                           # Random, DQN, PPO, A2C...
 
 environment:
-  initial_cash: 1000000                       # 初始資金
+  initial_cash: 100000                       # 初始資金(十萬)
   lookback: 20                                # 向前看的天數
   reward_mode: "daily_return"                 # 可選 daily_return / total_profit
   action_mode: "weights"                      # MultiDiscrete 動作模式
@@ -15,14 +15,14 @@ logging:
   outdir: "logs/runs"                         # 輸出目錄（會自動建立 run_XXXX 資料夾）
   save_summary: true                          # 是否存 summary.csv
   save_trades: true                           # 是否存 trades_all.csv
-  trade_sample_freq: 10                       # 每幾筆交易存一次（logger 控制）
+  trade_sample_freq: 1                       # 每幾筆交易存一次（logger 控制）
 
-DQN:
+dqn:
   gamma: 0.99
   epsilon_start: 1.0
-  epsilon_end: 0.05
-  epsilon_decay: 10000
+  epsilon_min: 0.05
+  epsilon_decay: 0.995
   lr: 0.0005
   batch_size: 64
-  memory_size: 100000
+  buffer_size: 100000
   target_update_freq: 1000

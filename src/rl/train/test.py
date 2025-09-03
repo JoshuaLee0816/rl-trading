@@ -87,7 +87,8 @@ if __name__ == "__main__":
 
     for ep in range(1, n_episodes + 1):
         obs, info = env.reset()
-        ep_reward = 0.0
+        #ep_reward = 0.0
+        daily_returns = []   #先存每天的 return
 
         while True:
             # 用 agent 選擇動作
@@ -100,16 +101,23 @@ if __name__ == "__main__":
                 agent.update()
 
             obs = next_obs
-            ep_reward += r
+            #ep_reward += r
+            daily_returns.append(r)
             logger.log_step(ep, info)
 
             if done or trunc:
                 break
+        
+        # episode 結束後，算累積報酬率
+        ep_return = 1.0
+        for dr in daily_returns:
+            ep_return *= (1.0 + dr)
+        ep_return -= 1.0   # 轉成百分比形式
 
         final_V = info["V"]
         ret_pct = (final_V - init_cash) / init_cash * 100
-        all_rewards.append(ep_reward)
-        summary.append({"episode": ep, "reward": ep_reward, "return_pct": ret_pct})
+        all_rewards.append(ep_return)
+        summary.append({"episode": ep, "reward": ep_return, "return_pct": ret_pct})
 
         if ep % save_freq == 0:
             plt.figure(figsize=(8, 4))
