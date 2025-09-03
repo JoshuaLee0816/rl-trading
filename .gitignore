@@ -8,7 +8,6 @@ __pycache__/
 # --- 虛擬環境 ---
 .venv/
 venv/
-ENV/
 
 # --- 作業系統 / 編輯器 ---
 .DS_Store
