@@ -24,7 +24,7 @@ Thumbs.db
 # --- 資料、衍生檔 ---
 data/raw/
 # 若 processed 也會很大，可加上（必要時移除）
-# data/processed/
+data/processed/
 
 # --- 日誌 ---
 logs/

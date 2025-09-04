@@ -1,0 +1,31 @@
+[33mcommit aecefca380ec3f32f73f9feb27690b738695857b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Merge: 0654c5a 87f3b9c
+Author: unknown <310274movie@gmail.com>
+Date:   Thu Sep 4 15:11:21 2025 +0800
+
+    Stop tracking processed data locally
+
+[33mcommit 0654c5a006e36bc61654c17151f3e3f8c37210aa[m
+Author: unknown <310274movie@gmail.com>
+Date:   Thu Sep 4 14:54:28 2025 +0800
+
+    Remove csv file data raw and processed
+
+ .gitignore | 2 [32m+[m[31m-[m
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+[33mcommit 4f48437f8acc4be63aa5aa3d6cd5fbcbe95c3e26[m
+Author: unknown <310274movie@gmail.com>
+Date:   Thu Sep 4 14:48:56 2025 +0800
+
+    Replace old processed CSV with _20 versions
+
+ config.yaml                                        |    3 [32m+[m
+ data/processed/all_stocks_clean.csv                | 5112 [32m++++++++++[m[31m----------[m
+ data/processed/all_stocks_clean_20.csv             | 2556 [32m++++++++++[m
+ data/processed/all_stocks_features.csv             | 4872 [32m+++++++++[m[31m----------[m
+ data/processed/all_stocks_features_20.csv          | 2436 [32m++++++++++[m
+ .../{training_data.csv => training_data_20.csv}    |    0
+ src/data/fetch_main.py                             |   12 [32m+[m[31m-[m
+ src/rl/train/test.py                               |    6 [32m+[m[31m-[m
+ 8 files changed, 9999 insertions(+), 4998 deletions(-)

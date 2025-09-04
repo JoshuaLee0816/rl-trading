@@ -4,6 +4,9 @@ training:
   seed: 42                                  # 隨機種子，方便重現結果
   model: "dqn"                           # Random, DQN, PPO, A2C...
 
+data:
+  file: "training_data_20.csv"
+
 safety:
   cool_down_every: 200                      # 每多少 episodes 強制休息
   sleep_seconds: 300                         # 休息幾秒

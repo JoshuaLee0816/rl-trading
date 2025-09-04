@@ -12,7 +12,7 @@ DATA_RAW = Path("data/raw")
 UNIVERSE_FILE = Path("data/twse_universe_2015_2024.xlsx")  # 讀 Universe 清單
 START_DATE = "2015-01-01"
 END_DATE   = "2025-06-30"
-N_SAMPLES = 20 #random amount
+N_SAMPLES = None #random amount
 
 def _load_numeric_ids(path: Path) -> list[str]: #之後要全部讀進來 action space 要忽略掉指數不能交易的部分 
     """從 xlsx 的 'Universe'（若不存在取第一張）讀出所有「純數字」stock_id。"""
@@ -43,9 +43,13 @@ def main():
 
     # 2) 讀清單 → 隨機抽 20 檔
     all_ids = _load_numeric_ids(UNIVERSE_FILE)
-    k = min(N_SAMPLES, len(all_ids))
-    sample_ids = random.sample(all_ids, k)
-    print("隨機挑選股票：", sample_ids)
+    if N_SAMPLES is None:
+        sample_ids = all_ids
+        print("抓取全部股票，共", len(sample_ids), "檔")
+    else:
+        k = min(N_SAMPLES, len(all_ids))
+        sample_ids = random.sample(all_ids, k)
+        print("隨機挑選股票：", sample_ids)
     print(f"抓取區間: {START_DATE} ~ {END_DATE}")
 
     DATA_RAW.mkdir(parents=True, exist_ok=True)

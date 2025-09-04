@@ -50,9 +50,11 @@ if __name__ == "__main__":
     with open(outdir / "config.yaml", "w") as f:
         yaml.dump(config, f)
 
-    # 載入資料
-    csv_path = ROOT / "data" / "processed" / "training_data.csv"
+    #從config載入訓練資料
+    data_file = config["data"].get("file", "training_data.csv")
+    csv_path = ROOT / "data" / "processed" / data_file
     df = pd.read_csv(csv_path, parse_dates=["date"])
+
     ids = sorted(df["stock_id"].unique())[:20]
 
     # 建立環境
