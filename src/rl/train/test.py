@@ -164,7 +164,7 @@ if __name__ == "__main__":
 
         if ep % save_freq == 0:
             plt.figure(figsize=(8, 4))
-            plt.plot(range(1, len(all_rewards)+1), all_rewards, marker="o")
+            plt.plot(range(1, len(all_rewards)+1), all_rewards)
             plt.xlabel("Episode")
             plt.ylabel("Total Reward")
             plt.title(f"Training Progress ({model_name})")
