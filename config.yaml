@@ -13,7 +13,7 @@ environment:
   lookback: 20                                # 向前看的天數
   reward_mode: "daily_return"                 # 可選 daily_return / total_profit
   action_mode: "weights"                      # MultiDiscrete 動作模式
-  max_holdings: 1                             # 最多同時持有幾檔股票 (目前先做限制備用)
+  max_holdings: 20                             # 最多同時持有幾檔股票 (目前先做限制備用)
 
 logging:
   outdir: "logs/runs"                         # 輸出目錄（會自動建立 run_XXXX 資料夾）

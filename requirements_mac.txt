@@ -1,0 +1,14 @@
+# Core ML & RL dependencies
+torch>=2.0.0
+torchvision
+torchaudio
+gymnasium==0.29.1
+numpy
+pandas
+matplotlib
+tqdm
+pyyaml
+
+# 下載台股資料
+yfinance
+FinMind
