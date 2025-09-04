@@ -87,6 +87,20 @@ class DQNAgent:
         self.epsilon_decay = config.get("epsilon_decay", 0.995)
         self.lr = config.get("lr", 1e-3)
         self.batch_size = config.get("batch_size", 64)
+        self.epsilon = config.get("epsilon_start", 1.0)
+        self.epsilon_min = config.get("epsilon_min", 0.01)
+
+        # 新增：探索衰減排程
+        self.epsilon_schedule = config.get("epsilon_schedule", "per_step")  # per_step(舊行為) / per_episode(新)
+        if self.epsilon_schedule == "per_episode":
+            # 依照「N 集後到達 epsilon_min」自動推導每集衰減率
+            N = max(1, int(config.get("epsilon_episodes_to_min", 5000)))
+            self.epsilon_decay_episode = (self.epsilon_min / max(1e-9, self.epsilon)) ** (1.0 / N)
+            self.epsilon_decay = None  # 不用 per-step
+        else:
+            # 保留舊的每步衰減機制
+            self.epsilon_decay = config.get("epsilon_decay", 0.995)
+            self.epsilon_decay_episode = None
 
         # --- 裝置選擇 ---
         device_cfg = config.get("device", "auto")
@@ -134,7 +148,10 @@ class DQNAgent:
                 action = q_values.argmax().item()
 
         # Decay epsilon (but keep >= epsilon_min)
-        self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
+        # 衰減策略：每步 or 每集
+        if self.epsilon_schedule == "per_step" and self.epsilon_decay is not None:
+            self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_min)
+
 
         # === 修正：把 int 動作轉成 [idx, lvl] ===
         if isinstance(action, int):
@@ -197,4 +214,8 @@ class DQNAgent:
         self.update_count += 1
         if self.update_count % self.config.get("target_update_freq", 100) == 0:
             self.target_network.load_state_dict(self.q_network.state_dict())
+    def on_episode_end(self):
+        if self.epsilon_schedule == "per_episode" and self.epsilon_decay_episode is not None:
+            self.epsilon = max(self.epsilon * self.epsilon_decay_episode, self.epsilon_min)
+
 

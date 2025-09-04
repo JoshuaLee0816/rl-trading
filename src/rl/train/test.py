@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 import datetime
 import time
+import torch
 from tqdm import trange
 
 # === 設定專案路徑 ===
@@ -68,7 +69,8 @@ if __name__ == "__main__":
         df = pd.read_csv(data_path, parse_dates=["date"])
 
 
-    ids = sorted(df["stock_id"].unique())[:20] #這個看有沒有要刪掉????
+    #ids = sorted(df["stock_id"].unique())[:20] #這個看有沒有要刪掉???? 應該要刪掉吧？
+    ids = sorted(df["stock_id"].unique()) #全部data
 
     # 建立環境
     max_holdings = config["environment"].get("max_holdings", None)
@@ -105,6 +107,11 @@ if __name__ == "__main__":
     trade_sample_freq = config["logging"].get("trade_sample_freq", 10)
     logger = RunLogger(outdir, trade_sample_freq)
 
+    update_every = config["training"].get("update_every", 1)
+    warmup_steps = config["training"].get("warmup_steps", 0)
+    grad_steps   = config["training"].get("grad_steps", 1)
+    global_step  = 0
+
     progress_bar = trange(1, n_episodes + 1, desc="Training", unit="episode")
 
     for ep in progress_bar:
@@ -120,8 +127,15 @@ if __name__ == "__main__":
             # 只在非 random 模型時存經驗 & 更新
             if model_name != "random":
                 agent.store_transition(obs, action, r, next_obs, done)
-                agent.update()
 
+                if global_step >= warmup_steps and (global_step % update_every == 0):
+                    for _ in range(grad_steps):
+                        agent.update()
+
+            if model_name == "dqn":
+                agent.on_episode_end()
+
+            global_step += 1
             obs = next_obs
             #ep_reward += r
             daily_returns.append(r)
@@ -165,6 +179,10 @@ if __name__ == "__main__":
         if cool_every and ep % cool_every == 0:
             print("休息一下")
             time.sleep(cool_secs)
+
+    if model_name == "dqn":
+        torch.save(agent.q_network.state_dict(), outdir / "dqn_model.pt")
+        torch.save(agent.target_network.state_dict(), outdir / "dqn_target.pt")
 
     if config["logging"]["save_summary"]:
         pd.DataFrame(summary).to_csv(outdir / "summary.csv", index=False)
