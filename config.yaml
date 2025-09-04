@@ -1,10 +1,10 @@
 training:
   n_episodes: 5000                           # 總訓練集數
-  save_freq: 20                             # 每幾集更新一次 reward_curve.png
+  save_freq: 5                             # 每幾集更新一次 reward_curve.png
   seed: 42                                  # 隨機種子，方便重現結果
   model: "dqn"                           # Random, DQN, PPO, A2C...
-  update_every: 10                         # 每幾步更新一次
-  warmup_steps: 10000                      # 至少先收 1000 步資料再開始更新
+  update_every: 50                         # 每幾步更新一次
+  warmup_steps: 10000                      # 至少先收 10000 步資料再開始更新
   grad_steps: 1                           # 每次觸發時連續更新幾次
 
 data:
@@ -33,9 +33,9 @@ dqn:
   epsilon_schedule: "per_episode"      # "per_episode" | "per_step"
   epsilon_start: 1.0
   epsilon_min: 0.05
-  epsilon_decay: 0.9998
+  epsilon_decay: 0.9995
   lr: 0.0005
   batch_size: 64
   buffer_size: 10000
-  target_update_freq: 1000
+  target_update_freq: 100              # 每幾次update就把Q Network 參數複製給target network
   device: "auto"                          # 可選 "cpu"、"mps"、"cuda"、"auto"
