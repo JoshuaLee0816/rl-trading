@@ -1,8 +1,12 @@
 training:
-  n_episodes: 1                           # 總訓練集數
+  n_episodes: 3                           # 總訓練集數
   save_freq: 1                             # 每幾集更新一次 reward_curve.png
   seed: 42                                  # 隨機種子，方便重現結果
   model: "dqn"                           # Random, DQN, PPO, A2C...
+
+safety:
+  cool_down_every: 200                      # 每多少 episodes 強制休息
+  sleep_seconds: 300                         # 休息幾秒
 
 environment:
   initial_cash: 100000                       # 初始資金(十萬)

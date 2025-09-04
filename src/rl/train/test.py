@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import pandas as pd
 import datetime
+import time
+from tqdm import trange
 
 # === 設定專案路徑 ===
 HERE = Path(__file__).resolve()
@@ -88,7 +90,9 @@ if __name__ == "__main__":
     trade_sample_freq = config["logging"].get("trade_sample_freq", 10)
     logger = RunLogger(outdir, trade_sample_freq)
 
-    for ep in range(1, n_episodes + 1):
+    progress_bar = trange(1, n_episodes + 1, desc="Training", unit="episode")
+
+    for ep in progress_bar:
         obs, info = env.reset()
         #ep_reward = 0.0
         daily_returns = []   #先存每天的 return
@@ -122,6 +126,13 @@ if __name__ == "__main__":
         all_rewards.append(ep_return)
         summary.append({"episode": ep, "reward": ep_return, "return_pct": ret_pct})
 
+        # 更新 tqdm 狀態
+        progress_bar.set_postfix({
+            #"Reward": f"{ep_return:.2f}",
+            #"Return%": f"{ret_pct:.2f}"   
+            #自己決定要不要顯示(還在斟酌)
+        })
+
         if ep % save_freq == 0:
             plt.figure(figsize=(8, 4))
             plt.plot(range(1, len(all_rewards)+1), all_rewards, marker="o")
@@ -132,6 +143,13 @@ if __name__ == "__main__":
             plt.tight_layout()
             plt.savefig(outdir / "reward_curve.png")
             plt.close()
+        
+        #  強制休息機制
+        cool_every = config.get("safety", {}).get("cool_down_every", None)
+        cool_secs = config.get("safety", {}).get("sleep_seconds", 0)
+        if cool_every and ep % cool_every == 0:
+            print("休息一下")
+            time.sleep(cool_secs)
 
     if config["logging"]["save_summary"]:
         pd.DataFrame(summary).to_csv(outdir / "summary.csv", index=False)
