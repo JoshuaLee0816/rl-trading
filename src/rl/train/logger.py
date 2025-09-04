@@ -2,12 +2,13 @@ from pathlib import Path
 import pandas as pd
 
 class RunLogger:
-    def __init__(self, outdir: Path):
+    def __init__(self, outdir: Path, trade_sample_freq: int = 10):
         self.outdir = Path(outdir)
         self.outdir.mkdir(parents=True, exist_ok=True)
         self.eq_rows = []
         self.trade_rows = []
         self.trade_count = 0
+        self.trade_sample_freq = trade_sample_freq  
 
     def log_step(self, ep: int, info: dict):
         '''
@@ -23,7 +24,7 @@ class RunLogger:
         '''
         # 有成交才記交易
         if info.get("exec_shares", 0) != 0:
-            if self.trade_count % 10 == 0:   #這邊調整要存多少比例的訓練資料
+            if self.trade_count % self.trade_sample_freq == 0:   #這邊調整要存多少比例的訓練資料
                 row = {
                     "episode": ep,
                     "date": info.get("date"),
@@ -33,8 +34,9 @@ class RunLogger:
                     "price_open": info.get("price_open"),
                     "price_close": info.get("price_close"),
                     "fees_tax": info.get("fees_tax"),
-                    "V_after": info.get("V"),
-                    "cash_after": info.get("cash"),
+                    "cash": info.get("cash"),
+                    "stock_value_after": info.get("stock_value"), 
+                    "Total_Assets": info.get("V")
                 }
                 pd.DataFrame([row]).to_csv(
                     self.outdir / "trades_all.csv",

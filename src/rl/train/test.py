@@ -54,10 +54,12 @@ if __name__ == "__main__":
     ids = sorted(df["stock_id"].unique())[:20]
 
     # 建立環境
+    max_holdings = config["environment"].get("max_holdings", None)
+
     env = StockTradingEnv(
         df=df, stock_ids=ids, lookback=lookback,
         initial_cash=init_cash, reward_mode=reward_mode,
-        action_mode=action_mode
+        action_mode=action_mode,max_holdings=max_holdings
     )
 
     # 初始化 agent
@@ -83,7 +85,8 @@ if __name__ == "__main__":
     # 訓練迴圈
     all_rewards = []
     summary = []
-    logger = RunLogger(outdir)
+    trade_sample_freq = config["logging"].get("trade_sample_freq", 10)
+    logger = RunLogger(outdir, trade_sample_freq)
 
     for ep in range(1, n_episodes + 1):
         obs, info = env.reset()

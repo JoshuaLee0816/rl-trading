@@ -39,6 +39,7 @@ class StockTradingEnv(gym.Env):
         stock_ids,
         lookback: int = 20, #決定往回看幾天來判斷今天的狀況(可能先抓20接近一個月 可調整)
         initial_cash: int = 100000,
+        max_holdings: int = None,
         fee_buy: float = 0.001425 * 0.6,  # 台股手續費 0.1425% * 折扣
         fee_sell: float = 0.001425 * 0.6,
         tax_sell: float = 0.003,          # 交易稅 0.3%
@@ -56,6 +57,7 @@ class StockTradingEnv(gym.Env):
         self.N = len(self.ids)
         self.K = int(lookback)
         self.initial_cash = int(initial_cash)
+        self.max_holdings = max_holdings
         self.fee_buy, self.fee_sell, self.tax_sell = float(fee_buy), float(fee_sell), float(tax_sell)
         self.reward_mode = str(reward_mode)
         self.action_mode = str(action_mode)
@@ -234,25 +236,34 @@ class StockTradingEnv(gym.Env):
 
         if delta_val > 1e-9 and p > 0 and self.cash > 0:
             # -------- BUY --------
-            max_by_cash = int(self.cash // ((1.0 + self.fee_buy) * p))
-            need_shares = int(delta_val // p)
-            raw_shares = min(max_by_cash, need_shares)
-            buy_shares = self._apply_lot_rules(raw_shares)
+            # 檢查 max_holdings 限制
+            if self.max_holdings is not None and self.max_holdings > 0:
+                held_count = int((self.shares > 0).sum())     # 目前已持有幾檔
+                already_holding = self.shares[idx] > 0        # 這檔是否已經持有
+                if held_count >= self.max_holdings and not already_holding:
+                    # 已達上限且這檔沒持有 → 禁止買入，但不要 return
+                    exec_shares, gross_cash, fees_tax = 0, 0, 0
+                else:
+                    max_by_cash = int(self.cash // ((1.0 + self.fee_buy) * p))
+                    need_shares = int(delta_val // p)
+                    raw_shares = min(max_by_cash, need_shares)
+                    buy_shares = self._apply_lot_rules(raw_shares)
 
-            if buy_shares > 0:
-                gross = self._round_currency(buy_shares * p)
-                fee   = self._round_currency(gross * self.fee_buy)
-                cash_out = gross + fee
-                if cash_out <= self.cash:
-                    self.shares[idx] += buy_shares
-                    self.cash        -= cash_out
-                    exec_shares = buy_shares
-                    gross_cash  = -gross
-                    fees_tax    = fee
+                    if buy_shares > 0:
+                        gross = self._round_currency(buy_shares * p)
+                        fee   = self._round_currency(gross * self.fee_buy)
+                        cash_out = gross + fee
+                        if cash_out <= self.cash:
+                            self.shares[idx] += buy_shares
+                            self.cash        -= cash_out
+                            exec_shares = buy_shares
+                            gross_cash  = -gross
+                            fees_tax    = fee
+
 
         elif delta_val < -1e-9 and p > 0:
             if self.shares[idx] <= 0:
-                # ⚠️ 沒持股卻要賣 → 當 HOLD 處理
+                #  沒持股卻要賣 → 當 HOLD 處理
                 exec_shares, gross_cash, fees_tax = 0, 0, 0
             else:
                 # -------- SELL --------
@@ -303,6 +314,7 @@ class StockTradingEnv(gym.Env):
         w_stocks_now = (self.shares * prices_c_now) / V_now if V_now > 0 else np.zeros(self.N)
         held = int((self.shares > 0).sum())
         w_max = float(w_stocks_now.max()) if held > 0 else 0.0
+        stock_value = int((self.shares * prices_c_now).sum())
 
         info = {
             "V": int(self.portfolio_value),
@@ -319,6 +331,7 @@ class StockTradingEnv(gym.Env):
             "price_close": price_c,
             "cash": int(self.cash),
             "shares_after": int(self.shares[idx]),
+            "stock_value": stock_value,  
             "side": ("BUY" if exec_shares > 0 else ("SELL" if exec_shares < 0 else "HOLD")),
             "notional": int(abs(gross_cash)),   # 成交毛額（正數）
             # 額外觀察用

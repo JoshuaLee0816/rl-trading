@@ -38,6 +38,7 @@ import torch.optim as optim
 import copy
 import random
 import numpy as np
+import platform
 
 class QNetwork(nn.Module):
     def __init__(self, obs_dim, action_dim, hidden_dim = 64):
@@ -87,9 +88,29 @@ class DQNAgent:
         self.lr = config.get("lr", 1e-3)
         self.batch_size = config.get("batch_size", 64)
 
+        # --- 裝置選擇 ---
+        device_cfg = config.get("device", "auto")
+        if device_cfg == "cpu":
+            self.device = torch.device("cpu")
+        elif device_cfg == "cuda" and torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        elif device_cfg == "mps" and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        elif device_cfg == "auto":
+            if platform.system() == "Darwin" and torch.backends.mps.is_available():
+                self.device = torch.device("mps")
+            elif torch.cuda.is_available():
+                self.device = torch.device("cuda")
+            else:
+                self.device = torch.device("cpu")
+        else:
+            self.device = torch.device("cpu")
+
+        print(f"[INFO] Using device: {self.device}")
+
         #Networks
-        self.q_network = QNetwork(obs_dim, action_dim)                              #用來學習狀態到動作價值（Q(s,a)）。
-        self.target_network = copy.deepcopy(self.q_network)                         #主要用途是「計算 Q-learning 更新的目標值」。
+        self.q_network = QNetwork(obs_dim, action_dim).to(self.device)                              #用來學習狀態到動作價值（Q(s,a)）。
+        self.target_network = copy.deepcopy(self.q_network).to(self.device)                             #主要用途是「計算 Q-learning 更新的目標值」。
         self.target_network.eval() #target net does not update directly
 
         self.optimizer = optim.Adam(self.q_network.parameters(), lr = self.lr)
@@ -100,7 +121,7 @@ class DQNAgent:
 
     def select_action(self, obs):
         # Convert obs to tensor
-        obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)               #PyTorch QNetwork 期望輸入torch.Tensor
+        obs_tensor = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)               #PyTorch QNetwork 期望輸入torch.Tensor
 
         # ε-greedy strategy
         if random.random() < self.epsilon:
@@ -148,11 +169,11 @@ class DQNAgent:
         obs, actions, rewards, next_obs, dones = self.replay_buffer.sample(self.batch_size)
 
         # Convert to tensors
-        obs      = torch.tensor(obs, dtype=torch.float32)
-        actions  = torch.tensor(actions, dtype=torch.long).unsqueeze(1)  # shape: [batch, 1]
-        rewards  = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)
-        next_obs = torch.tensor(next_obs, dtype=torch.float32)
-        dones    = torch.tensor(dones, dtype=torch.float32).unsqueeze(1)
+        obs      = torch.tensor(obs, dtype=torch.float32,device=self.device)
+        actions  = torch.tensor(actions, dtype=torch.long,device=self.device).unsqueeze(1)  # shape: [batch, 1]
+        rewards  = torch.tensor(rewards, dtype=torch.float32,device=self.device).unsqueeze(1)
+        next_obs = torch.tensor(next_obs, dtype=torch.float32,device=self.device)
+        dones    = torch.tensor(dones, dtype=torch.float32,device=self.device).unsqueeze(1)
 
         # Current Q values for chosen actions
         q_values = self.q_network(obs).gather(1, actions)
