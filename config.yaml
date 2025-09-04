@@ -5,7 +5,8 @@ training:
   model: "dqn"                           # Random, DQN, PPO, A2C...
 
 data:
-  file: "training_data_20.csv"
+  #file: "training_data_20.csv"
+  file: "training_data_all.parquet"
 
 safety:
   cool_down_every: 200                      # 每多少 episodes 強制休息

@@ -51,11 +51,24 @@ if __name__ == "__main__":
         yaml.dump(config, f)
 
     #從config載入訓練資料
+    """
+    #一般csv版本
     data_file = config["data"].get("file", "training_data.csv")
     csv_path = ROOT / "data" / "processed" / data_file
     df = pd.read_csv(csv_path, parse_dates=["date"])
+    """
 
-    ids = sorted(df["stock_id"].unique())[:20]
+    # 從 config.yaml 讀檔案名稱
+    data_file = config["data"].get("file", "training_data_20.parquet")
+    data_path = ROOT / "data" / "processed" / data_file
+
+    if data_file.endswith(".parquet"):
+        df = pd.read_parquet(data_path)
+    else:
+        df = pd.read_csv(data_path, parse_dates=["date"])
+
+
+    ids = sorted(df["stock_id"].unique())[:20] #這個看有沒有要刪掉????
 
     # 建立環境
     max_holdings = config["environment"].get("max_holdings", None)
