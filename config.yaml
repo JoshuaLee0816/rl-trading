@@ -48,8 +48,8 @@ ppo:
   critic_lr: 0.001
   batch_size: 64
   n_steps: 2048
-  epochs: 5
-  entropy_coef: 0.02
+  epochs: 3
+  entropy_coef: 0.1
   value_coef: 0.5
   device: "auto"
   num_envs: 4

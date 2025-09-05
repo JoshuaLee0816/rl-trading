@@ -170,17 +170,32 @@ if __name__ == "__main__":
 
             # 更新
             agent.update()
-
+            """
             # 在 episode 結束時，直接取 agent.entropy_log 的最新值
             if len(agent.entropy_log) > 0:
                 episode_entropy.append(agent.entropy_log[-1])
-
+            
             ep_return = np.mean(daily_returns)
             final_V = np.mean([info.get("V", init_cash) for info in infos_list])
             ret_pct = (final_V - init_cash) / init_cash * 100
 
             all_rewards.append(ep_return)
             summary.append({"episode": ep, "reward": ep_return, "return_pct": ret_pct})
+            """
+            # 在 episode 結束時，直接取 agent.entropy_log 的最新值
+            if len(agent.entropy_log) > 0:
+                episode_entropy.append(agent.entropy_log[-1])
+
+            # final_V = episode 最後的平均資產
+            final_V = np.mean([info.get("V", init_cash) for info in infos_list])
+
+            # 用最後資產 - 初始資金 = 總損益
+            ep_return = final_V - init_cash
+            ret_pct = (final_V - init_cash) / init_cash * 100
+
+            all_rewards.append(ep_return)
+            summary.append({"episode": ep, "reward": ep_return, "return_pct": ret_pct})
+
 
             if ep % save_freq == 0:
                 fig, ax1 = plt.subplots(figsize=(8, 4))
