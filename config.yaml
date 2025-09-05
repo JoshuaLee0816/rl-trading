@@ -1,4 +1,5 @@
 training:
+  model: "ppo"                            #控制哪個model跑模型
   n_episodes: 5000                           # 總訓練集數
   save_freq: 5                             # 每幾集更新一次 reward_curve.png
   seed: 42                                  # 隨機種子，方便重現結果
@@ -51,6 +52,7 @@ ppo:
   epochs: 10
   entropy_coef: 0.01
   value_coef: 0.5
-  device: "auto"     
+  device: "auto"
+  num_envs: 4                         #多少顆CPU一起收集資料     
 
 
