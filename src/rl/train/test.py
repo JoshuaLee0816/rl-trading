@@ -9,6 +9,7 @@ import time
 import torch
 import numpy as np
 import gymnasium as gym
+from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv
 from tqdm import trange
 
 # === 設定專案路徑 ===
@@ -65,13 +66,22 @@ if __name__ == "__main__":
     # === 建立環境 ===
     if model_name == "ppo":
         num_envs = config["ppo"].get("num_envs", 4)
+        use_subproc = config["ppo"].get("use_subproc", True)
+
         def make_env():
             return StockTradingEnv(
                 df=df, stock_ids=ids, lookback=lookback,
                 initial_cash=init_cash, reward_mode=reward_mode,
                 action_mode=action_mode, max_holdings=max_holdings
             )
-        env = gym.vector.SyncVectorEnv([make_env for _ in range(num_envs)])
+
+        if use_subproc:
+            env = AsyncVectorEnv([make_env for _ in range(num_envs)])
+            print(f"[INFO] PPO 使用 SubprocVectorEnv 並行 {num_envs} 個環境 (多核 CPU)")
+        else:
+            env = AsyncVectorEnv([make_env for _ in range(num_envs)])
+            print(f"[INFO] PPO 使用 SyncVectorEnv 並行 {num_envs} 個環境 (單核)")
+
     else:
         env = StockTradingEnv(
             df=df, stock_ids=ids, lookback=lookback,
@@ -111,7 +121,7 @@ if __name__ == "__main__":
 
     progress_bar = trange(1, n_episodes + 1, desc="Training", unit="episode")
 
-    # === PPO 訓練 ===
+    # === PPO 訓練 (多環境並行) ===
     if model_name == "ppo":
         for ep in progress_bar:
             obs, infos = env.reset()
@@ -127,8 +137,7 @@ if __name__ == "__main__":
                         obs[i], actions[i], rewards[i], dones[i],
                         log_probs[i], values[i]
                     )
-                    # 在這裡 log 每個環境的交易紀錄 多筆資料vector紀錄
-                    logger.log_step(ep, infos[i])
+                    logger.log_step(ep, infos[i])  # 多環境 log
 
                 obs = next_obs
                 daily_returns.extend(rewards.tolist())
@@ -154,8 +163,7 @@ if __name__ == "__main__":
                 plt.savefig(outdir / "reward_curve.png")
                 plt.close()
 
-
-    # === DQN / Random 訓練 ===
+    # === DQN / Random 訓練 (單環境) ===
     else:
         for ep in progress_bar:
             obs, info = env.reset()
