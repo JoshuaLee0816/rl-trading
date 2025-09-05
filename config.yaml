@@ -1,16 +1,15 @@
 training:
   model: "ppo"                            #控制哪個model跑模型
   n_episodes: 5000                           # 總訓練集數
-  save_freq: 5                             # 每幾集更新一次 reward_curve.png
+  save_freq: 1                             # 每幾集更新一次 reward_curve.png
   seed: 42                                  # 隨機種子，方便重現結果
-  model: "dqn"                           # Random, DQN, PPO, A2C...
   update_every: 50                         # 每幾步更新一次
   warmup_steps: 10000                      # 至少先收 10000 步資料再開始更新
   grad_steps: 1                           # 每次觸發時連續更新幾次
 
 data:
-  #file: "training_data_20.csv"
-  file: "training_data_all.parquet"
+  file: "training_data_20.csv"
+  #file: "training_data_all.parquet"
 
 safety:
   cool_down_every: 200                      # 每多少 episodes 強制休息
@@ -45,11 +44,12 @@ ppo:
   gamma: 0.99
   gae_lambda: 0.95
   clip_epsilon: 0.2
-  lr: 0.0003
-  batch_size: 256
+  actor_lr: 0.0003
+  critic_lr: 0.001
+  batch_size: 64
   n_steps: 2048
-  epochs: 10
-  entropy_coef: 0.01
+  epochs: 5
+  entropy_coef: 0.02
   value_coef: 0.5
   device: "auto"
   num_envs: 4

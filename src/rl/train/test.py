@@ -29,7 +29,24 @@ from rl.env.StockTradingEnv import StockTradingEnv
 from rl.train.logger import RunLogger
 
 
+def split_infos(infos):
+    """把 dict of arrays 轉成 list of dicts"""
+    if isinstance(infos, dict) and isinstance(list(infos.values())[0], (np.ndarray, list)):
+        num_envs = len(next(iter(infos.values())))
+        return [
+            {k: (v[i] if isinstance(v, (np.ndarray, list)) else v) for k, v in infos.items()}
+            for i in range(num_envs)
+        ]
+    elif isinstance(infos, dict):
+        return [infos]
+    else:
+        return infos
+
+
 if __name__ == "__main__":
+
+    episode_entropy = []
+
     # 讀取 config.yaml
     with open(ROOT / "config.yaml", "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -90,13 +107,19 @@ if __name__ == "__main__":
         )
 
     # === 初始化 agent ===
-    obs_dim = env.observation_space.shape[0]
-    if hasattr(env.action_space, "n"):
+    obs_dim = env.single_observation_space.shape[0]    #為甚麼 維度討論
+
+    if isinstance(env.action_space, gym.spaces.Discrete):
         action_dim = env.action_space.n
-    elif hasattr(env.action_space, "nvec"):
-        action_dim = int(env.action_space.nvec.prod())
+    elif isinstance(env.action_space, gym.spaces.MultiDiscrete):
+        action_dim = int(np.prod(env.action_space.nvec))
+    elif isinstance(env.action_space, gym.spaces.Box):
+        # Box 代表連續動作空間，用於 PPO 連續控制
+        action_dim = env.action_space.shape[0]
     else:
-        raise ValueError("Unsupported action_space type")
+        raise ValueError(f"Unsupported action_space type: {type(env.action_space)}")
+
+
 
     if model_name == "random":
         agent = RandomAgent(env.action_space)
@@ -132,12 +155,15 @@ if __name__ == "__main__":
                 actions, log_probs, values = agent.select_action(obs)
                 next_obs, rewards, dones, truncs, infos = env.step(actions)
 
-                for i in range(env.num_envs):
+                # === 新增：統一轉成 list[dict] ===
+                infos_list = split_infos(infos)
+
+                for i in range(len(infos_list)):
                     agent.store_transition(
                         obs[i], actions[i], rewards[i], dones[i],
                         log_probs[i], values[i]
                     )
-                    logger.log_step(ep, infos[i])  # 多環境 log
+                    logger.log_step(ep, infos_list[i])
 
                 obs = next_obs
                 daily_returns.extend(rewards.tolist())
@@ -145,23 +171,40 @@ if __name__ == "__main__":
             # 更新
             agent.update()
 
+            # 在 episode 結束時，直接取 agent.entropy_log 的最新值
+            if len(agent.entropy_log) > 0:
+                episode_entropy.append(agent.entropy_log[-1])
+
             ep_return = np.mean(daily_returns)
-            final_V = np.mean([i.get("V", init_cash) for i in infos])
+            final_V = np.mean([info.get("V", init_cash) for info in infos_list])
             ret_pct = (final_V - init_cash) / init_cash * 100
 
             all_rewards.append(ep_return)
             summary.append({"episode": ep, "reward": ep_return, "return_pct": ret_pct})
 
             if ep % save_freq == 0:
-                plt.figure(figsize=(8, 4))
-                plt.plot(range(1, len(all_rewards)+1), all_rewards)
-                plt.xlabel("Episode")
-                plt.ylabel("Total Reward")
-                plt.title(f"Training Progress ({model_name})")
+                fig, ax1 = plt.subplots(figsize=(8, 4))
+
+                # 左邊 y 軸：Reward
+                ax1.plot(range(1, len(all_rewards)+1), all_rewards, color="tab:blue", label="Reward")
+                ax1.set_xlabel("Episode")
+                ax1.set_ylabel("Total Reward", color="tab:blue")
+                ax1.tick_params(axis="y", labelcolor="tab:blue")
+
+                # 右邊 y 軸：Entropy
+                if len(episode_entropy) > 0:
+                    ax2 = ax1.twinx()
+                    ax2.plot(range(1, len(episode_entropy)+1), episode_entropy, color="tab:orange", label="Entropy")
+                    ax2.set_ylabel("Entropy", color="tab:orange")
+                    ax2.tick_params(axis="y", labelcolor="tab:orange")
+
+                # 標題 & 格式
+                fig.suptitle(f"Training Progress ({model_name})")
+                fig.tight_layout()
                 plt.grid(True)
-                plt.tight_layout()
-                plt.savefig(outdir / "reward_curve.png")
+                plt.savefig(outdir / "reward_entropy_curve.png")
                 plt.close()
+
 
     # === DQN / Random 訓練 (單環境) ===
     else:

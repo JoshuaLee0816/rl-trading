@@ -10,7 +10,7 @@ class Actor (nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(obs_dim, hidden_dim),
-            nn.ReLu(),
+            nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, action_dim),
@@ -66,6 +66,7 @@ class PPOAgent:
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.config = config
+        self.entropy_log = []
 
         # === 超參數從 config.yaml ===
         self.gamma = config.get("gamma")
@@ -111,31 +112,46 @@ class PPOAgent:
         self.buffer = RolloutBuffer()
 
     def select_action(self, obs):
-        """obs 可以是 (n_envs, obs_dim) 或 (obs_dim,) [並行或單獨跑 輸入資料筆數不同]"""
+        """obs 可以是 (n_envs, obs_dim) 或 (obs_dim,)"""
         obs_tensor = torch.tensor(obs, dtype=torch.float32, device=self.device)
-        if obs_tensor.dim() == 1: #單環境為了維度正確
+        if obs_tensor.dim() == 1:  # 單環境 → 保持 batch 維度
             obs_tensor = obs_tensor.unsqueeze(0)
-        
-        probs = self.actor(obs_tensor)
+
+        probs = self.actor(obs_tensor)  # [batch, action_dim]
         dist = torch.distributions.Categorical(probs)
-        actions = dist.sample()
+        actions = dist.sample()         # flat action (0 ~ N*5-1)
         log_probs = dist.log_prob(actions)
         values = self.critic(obs_tensor).squeeze()
 
+        # === 將 flat action 還原成 (idx, lvl) ===
+        idx = (actions // 5).cpu().numpy()
+        lvl = (actions % 5).cpu().numpy()
+        combined_actions = np.stack([idx, lvl], axis=-1)  # shape [batch, 2]
+
         return (
-            actions.cpu().numpy(),
-            log_probs.detach().cpu().numpy(),
+            combined_actions,                   # 給 env 用 (idx, lvl)
+            log_probs.detach().cpu().numpy(),   # 存 buffer
             values.detach().cpu().numpy(),
         )
 
+
     def store_transition(self, obs, action, reward, done, log_prob, value):
-        self.buffer.add(obs, action, reward, done, log_prob, value)
+        """
+        action: (idx, lvl) → 還原成 flat action 存起來
+        """
+        if isinstance(action, (list, np.ndarray)) and len(action) == 2:
+            idx, lvl = action
+            flat_action = idx * 5 + lvl
+        else:
+            flat_action = action
+
+        self.buffer.add(obs, flat_action, reward, done, log_prob, value)
+
 
     def update(self):
         obs, actions, rewards, dones, old_log_probs, values = self.buffer.get()
-        self.buffer.clear()   #清空舊資料
+        self.buffer.clear()
 
-        # 轉成torch tensor
         obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
         actions = torch.tensor(actions, dtype=torch.long, device=self.device)
         rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
@@ -143,20 +159,17 @@ class PPOAgent:
         old_log_probs = torch.tensor(old_log_probs, dtype=torch.float32, device=self.device)
         values = torch.tensor(values, dtype=torch.float32, device=self.device)
 
-        # 計算 GAE advantage
         returns, advantages = self._compute_gae(rewards, dones, values)
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) #標準化 考慮???
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        # 多次 epoch 更新
         dataset_size = len(obs)
-        """
-        時間性已經在advantages計算的時候保留了，update的時候不須注意時間性，才能穩定梯度
-        """
+        entropies = []   # 收集這次 update 所有 batch 的 entropy
+
         for _ in range(self.epochs):
             idxs = np.arange(dataset_size)
-            np.random.shuffle(idxs)  #這邊就先打亂了原本的順序，做出隨機穩定梯度
+            np.random.shuffle(idxs)
 
-            for start in range(0, dataset_size, self.batch_size): #從n_steps收集的資料裡面隨機切出batch_size大小的資料來做更新
+            for start in range(0, dataset_size, self.batch_size):
                 end = start + self.batch_size
                 batch_idx = idxs[start:end]
 
@@ -166,35 +179,34 @@ class PPOAgent:
                 batch_adv = advantages[batch_idx]
                 batch_old_log_probs = old_log_probs[batch_idx]
 
-                # 計算新的 log_probs
                 probs = self.actor(batch_obs)
                 dist = torch.distributions.Categorical(probs)
                 new_log_probs = dist.log_prob(batch_actions)
                 entropy = dist.entropy().mean()
+                entropies.append(entropy.item())
 
-                # ratio
                 ratio = torch.exp(new_log_probs - batch_old_log_probs)
-
-                # clipped surrogate
                 surr1 = ratio * batch_adv
                 surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * batch_adv
-                actor_loss = -torch.min(surr1, surr2).mean()
+                actor_loss = -torch.min(surr1, surr2).mean() - self.entropy_coef * entropy
 
-                # critic loss
                 values_pred = self.critic(batch_obs).squeeze()
                 critic_loss = (batch_returns - values_pred).pow(2).mean()
 
-                # 總 loss
-                loss = actor_loss + self.value_coef * critic_loss - self.entropy_coef * entropy
+                # --- 更新 Actor ---
+                self.actor_optimizer.zero_grad()
+                actor_loss.backward()
+                self.actor_optimizer.step()
 
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-                """
-                讓 Actor 更新策略，往 advantage 較高的動作方向調整，但控制更新幅度（clipping）。
-                讓 Critic 更準確地預測狀態價值，提供更好的 baseline。
-                加入 entropy bonus，避免策略過早收斂，保持探索。
-                """
+                # --- 更新 Critic ---
+                self.critic_optimizer.zero_grad()
+                critic_loss.backward()
+                self.critic_optimizer.step()
+
+        # === 在一次完整 update 結束後，記錄平均 entropy ===
+        if entropies:
+            self.entropy_log.append(float(np.mean(entropies)))
+
 
     def _compute_gae(self, rewards, dones, values):
         returns, advs = [], []
