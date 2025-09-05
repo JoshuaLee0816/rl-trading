@@ -133,9 +133,9 @@ class PPOAgent:
 
     def update(self):
         obs, actions, rewards, dones, old_log_probs, values = self.buffer.get()
-        self.buffer.clear()
+        self.buffer.clear()   #清空舊資料
 
-        # torch tensor
+        # 轉成torch tensor
         obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
         actions = torch.tensor(actions, dtype=torch.long, device=self.device)
         rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
@@ -145,15 +145,18 @@ class PPOAgent:
 
         # 計算 GAE advantage
         returns, advantages = self._compute_gae(rewards, dones, values)
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) #標準化 考慮???
 
         # 多次 epoch 更新
         dataset_size = len(obs)
+        """
+        時間性已經在advantages計算的時候保留了，update的時候不須注意時間性，才能穩定梯度
+        """
         for _ in range(self.epochs):
             idxs = np.arange(dataset_size)
-            np.random.shuffle(idxs)
+            np.random.shuffle(idxs)  #這邊就先打亂了原本的順序，做出隨機穩定梯度
 
-            for start in range(0, dataset_size, self.batch_size):
+            for start in range(0, dataset_size, self.batch_size): #從n_steps收集的資料裡面隨機切出batch_size大小的資料來做更新
                 end = start + self.batch_size
                 batch_idx = idxs[start:end]
 
@@ -187,6 +190,11 @@ class PPOAgent:
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+                """
+                讓 Actor 更新策略，往 advantage 較高的動作方向調整，但控制更新幅度（clipping）。
+                讓 Critic 更準確地預測狀態價值，提供更好的 baseline。
+                加入 entropy bonus，避免策略過早收斂，保持探索。
+                """
 
     def _compute_gae(self, rewards, dones, values):
         returns, advs = [], []
