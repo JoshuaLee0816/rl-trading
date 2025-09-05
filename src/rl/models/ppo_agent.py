@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import platform
+import torch.nn.functional as F #處理Actor forward過小問題 （機率）
 
 class Actor (nn.Module):
     def __init__(self, obs_dim, action_dim, hidden_dim = 64):
@@ -17,7 +18,8 @@ class Actor (nn.Module):
             nn.Softmax(dim = 1)
         )
     def forward(self, x):
-        return self.net(x)
+        logits = self.net(x)
+        return F.softmax(logits, dim=-1)
 
 class Critic (nn.Module):
     def __init__(self, obs_dim, hidden_dim = 64):
@@ -30,8 +32,8 @@ class Critic (nn.Module):
             nn.Linear(hidden_dim, 1)
         )
     def forward(self, x):
-        return self.net(x)
-    
+        return self.net(x)             # 直接輸出 value，不要 softmax 這很重要 他是value?
+
 class RolloutBuffer:
     """存放 n_steps * n_envs 的資料"""
     #RolloutBuffer = 短期收集一批 episode 的資料 → 算 advantage → 拿去更新 → 清空
@@ -139,6 +141,7 @@ class PPOAgent:
         """
         action: (idx, lvl) → 還原成 flat action 存起來
         """
+        
         if isinstance(action, (list, np.ndarray)) and len(action) == 2:
             idx, lvl = action
             flat_action = idx * 5 + lvl
@@ -149,9 +152,15 @@ class PPOAgent:
 
 
     def update(self):
+        
+
         obs, actions, rewards, dones, old_log_probs, values = self.buffer.get()
         self.buffer.clear()
-
+        """
+        print("Buffer obs shape:", obs.shape)
+        print("Buffer actions sample:", actions[:10])
+        print("Buffer rewards sample:", rewards[:10])
+        """
         obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
         actions = torch.tensor(actions, dtype=torch.long, device=self.device)
         rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
@@ -161,6 +170,8 @@ class PPOAgent:
 
         returns, advantages = self._compute_gae(rewards, dones, values)
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        #print("Advantage stats:", advantages.min().item(), advantages.max().item(), advantages.mean().item())
 
         dataset_size = len(obs)
         entropies = []   # 收集這次 update 所有 batch 的 entropy
@@ -183,13 +194,26 @@ class PPOAgent:
                 dist = torch.distributions.Categorical(probs)
                 new_log_probs = dist.log_prob(batch_actions)
                 entropy = dist.entropy().mean()
+
+                # === Debug print ===
+                #print("batch_actions unique:", batch_actions.unique())
+                #print("probs[0]:", probs[0].detach().cpu().numpy())
+                #print("new_log_probs sample:", new_log_probs[:5].detach().cpu().numpy())
+
+                #print("Entropy batch mean:", entropy.item())
+                #print("Actor probs sample:", probs[0].detach().cpu().numpy()[:10])
+
                 entropies.append(entropy.item())
 
+                # ratio
                 ratio = torch.exp(new_log_probs - batch_old_log_probs)
                 surr1 = ratio * batch_adv
                 surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * batch_adv
+
+                # actor loss (加上 entropy)
                 actor_loss = -torch.min(surr1, surr2).mean() - self.entropy_coef * entropy
 
+                # critic loss
                 values_pred = self.critic(batch_obs).squeeze()
                 critic_loss = (batch_returns - values_pred).pow(2).mean()
 
@@ -202,11 +226,14 @@ class PPOAgent:
                 self.critic_optimizer.zero_grad()
                 critic_loss.backward()
                 self.critic_optimizer.step()
+                
 
-        # === 在一次完整 update 結束後，記錄平均 entropy ===
-        if entropies:
-            self.entropy_log.append(float(np.mean(entropies)))
 
+
+
+        if entropies:  # entropies 是這次 update 收集的 batch 熵
+            avg_entropy = float(np.mean(entropies))
+            self.entropy_log.append(avg_entropy)
 
     def _compute_gae(self, rewards, dones, values):
         returns, advs = [], []

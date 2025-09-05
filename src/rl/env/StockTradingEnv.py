@@ -156,8 +156,8 @@ class StockTradingEnv(gym.Env):
     
     def _compute_reward(self, V_prev: float, V_new: float) -> float:
         mode = self.reward_mode.lower()
-        if mode == "daily_return":
-            return float((V_new - V_prev) / max(1e-9, V_prev))
+        if mode == "daily_return": 
+            return 10000*float((V_new - V_prev) / max(1e-9, V_prev))
         elif mode == "total_profit":
             return float(V_new - self.initial_cash)
         else: #預設總報酬

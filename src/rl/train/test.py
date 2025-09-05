@@ -182,19 +182,26 @@ if __name__ == "__main__":
             all_rewards.append(ep_return)
             summary.append({"episode": ep, "reward": ep_return, "return_pct": ret_pct})
             """
-            # 在 episode 結束時，直接取 agent.entropy_log 的最新值
             if len(agent.entropy_log) > 0:
-                episode_entropy.append(agent.entropy_log[-1])
+                avg_entropy = agent.entropy_log[-1]   # 取這個 episode update 的平均熵
+                episode_entropy.append(avg_entropy)
 
-            # final_V = episode 最後的平均資產
+
             final_V = np.mean([info.get("V", init_cash) for info in infos_list])
 
-            # 用最後資產 - 初始資金 = 總損益
-            ep_return = final_V - init_cash
-            ret_pct = (final_V - init_cash) / init_cash * 100
+            # episode 的總報酬率
+            total_return = (final_V - init_cash) / init_cash
+
+            # 換算成年化 (假設一年 252 個交易日)
+            days = len(daily_returns) if len(daily_returns) > 0 else 1
+            annualized_return = (1 + total_return) ** (252 / days) - 1
+
+            # 轉成百分比顯示
+            ep_return = annualized_return * 100
+            ret_pct = ep_return
 
             all_rewards.append(ep_return)
-            summary.append({"episode": ep, "reward": ep_return, "return_pct": ret_pct})
+            summary.append({"episode": ep, "annualized_return_pct": ep_return})
 
 
             if ep % save_freq == 0:

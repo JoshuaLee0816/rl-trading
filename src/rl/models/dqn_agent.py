@@ -214,6 +214,7 @@ class DQNAgent:
         self.update_count += 1
         if self.update_count % self.config.get("target_update_freq", 100) == 0:
             self.target_network.load_state_dict(self.q_network.state_dict())
+            
     def on_episode_end(self):
         if self.epsilon_schedule == "per_episode" and self.epsilon_decay_episode is not None:
             self.epsilon = max(self.epsilon * self.epsilon_decay_episode, self.epsilon_min)
