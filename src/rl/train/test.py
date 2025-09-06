@@ -1,11 +1,15 @@
 # src/rl/train/test.py
-import sys, importlib
+import os
+# 建議：MPS 上 Dirichlet 會缺 op，先開 fallback，避免漏掉時直接崩潰
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
+import sys
+import importlib
 import yaml
 import matplotlib.pyplot as plt
 from pathlib import Path
 import pandas as pd
 import datetime
-import time
 import torch
 import numpy as np
 import gymnasium as gym
@@ -14,8 +18,8 @@ from tqdm import trange
 
 # === 設定專案路徑 ===
 HERE = Path(__file__).resolve()
-SRC_DIR = HERE.parents[2]          # .../RL_Trading/src
-ROOT = HERE.parents[3]             # .../RL_Trading
+SRC_DIR = HERE.parents[2]          # .../rl-trading/src
+ROOT = HERE.parents[3]             # .../rl-trading
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
@@ -30,7 +34,7 @@ from rl.train.logger import RunLogger
 
 
 def split_infos(infos):
-    """把 dict of arrays 轉成 list of dicts"""
+    """把 dict of arrays 轉成 list of dicts（給 vector env 用）"""
     if isinstance(infos, dict) and isinstance(list(infos.values())[0], (np.ndarray, list)):
         num_envs = len(next(iter(infos.values())))
         return [
@@ -44,10 +48,9 @@ def split_infos(infos):
 
 
 if __name__ == "__main__":
-
     episode_entropy = []
 
-    # 讀取 config.yaml
+    # === 讀取 config.yaml ===
     with open(ROOT / "config.yaml", "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
@@ -55,10 +58,10 @@ if __name__ == "__main__":
     save_freq  = config["training"]["save_freq"]
     model_name = config["training"].get("model", "random").lower()
 
-    init_cash  = config["environment"]["initial_cash"]
-    lookback   = config["environment"]["lookback"]
-    reward_mode = config["environment"]["reward_mode"]
-    action_mode = config["environment"]["action_mode"]
+    init_cash   = config["environment"]["initial_cash"]
+    lookback    = config["environment"]["lookback"]
+    reward_mode = str(config["environment"]["reward_mode"]).lower().strip()
+    action_mode = str(config["environment"]["action_mode"]).lower().strip()
 
     outdir = ROOT / config["logging"]["outdir"]
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -87,42 +90,57 @@ if __name__ == "__main__":
 
         def make_env():
             return StockTradingEnv(
-                df=df, stock_ids=ids, lookback=lookback,
-                initial_cash=init_cash, reward_mode=reward_mode,
-                action_mode=action_mode, max_holdings=max_holdings
+                df=df,
+                stock_ids=ids,
+                lookback=lookback,
+                initial_cash=init_cash,
+                reward_mode=reward_mode,
+                action_mode=action_mode,
+                max_holdings=max_holdings,
             )
 
         if use_subproc:
             env = AsyncVectorEnv([make_env for _ in range(num_envs)])
             print(f"[INFO] PPO 使用 SubprocVectorEnv 並行 {num_envs} 個環境 (多核 CPU)")
         else:
-            env = AsyncVectorEnv([make_env for _ in range(num_envs)])
+            env = SyncVectorEnv([make_env for _ in range(num_envs)])
             print(f"[INFO] PPO 使用 SyncVectorEnv 並行 {num_envs} 個環境 (單核)")
-
     else:
         env = StockTradingEnv(
-            df=df, stock_ids=ids, lookback=lookback,
-            initial_cash=init_cash, reward_mode=reward_mode,
-            action_mode=action_mode, max_holdings=max_holdings
+            df=df,
+            stock_ids=ids,
+            lookback=lookback,
+            initial_cash=init_cash,
+            reward_mode=reward_mode,
+            action_mode=action_mode,
+            max_holdings=max_holdings,
         )
 
     # === 初始化 agent ===
-    obs_dim = env.single_observation_space.shape[0]    #為甚麼 維度討論
-
-    if isinstance(env.action_space, gym.spaces.Discrete):
-        action_dim = env.action_space.n
-    elif isinstance(env.action_space, gym.spaces.MultiDiscrete):
-        action_dim = int(np.prod(env.action_space.nvec))
-    elif isinstance(env.action_space, gym.spaces.Box):
-        # Box 代表連續動作空間，用於 PPO 連續控制
-        action_dim = env.action_space.shape[0]
+    # 使用 single_*（重點：VectorEnv 不能用 env.action_space 直接取維度）
+    if hasattr(env, "single_observation_space"):
+        single_os = env.single_observation_space
+        single_as = env.single_action_space
     else:
-        raise ValueError(f"Unsupported action_space type: {type(env.action_space)}")
+        single_os = env.observation_space
+        single_as = env.action_space
 
+    obs_dim = int(np.prod(single_os.shape))
 
+    if isinstance(single_as, gym.spaces.Box):
+        action_dim = int(np.prod(single_as.shape))  # portfolio: N+1, weights: N
+    elif isinstance(single_as, gym.spaces.MultiDiscrete):
+        action_dim = int(np.prod(single_as.nvec))
+    elif isinstance(single_as, gym.spaces.Discrete):
+        action_dim = single_as.n
+    else:
+        raise ValueError(f"Unsupported action_space type: {type(single_as)}")
+
+    #print(f"[DEBUG] obs_dim={obs_dim}, action_dim={action_dim}, "
+          #f"single_action_space.shape={single_as.shape}, single_obs_space.shape={single_os.shape}")
 
     if model_name == "random":
-        agent = RandomAgent(env.action_space)
+        agent = RandomAgent(single_as)
     elif model_name == "dqn":
         agent = DQNAgent(obs_dim, action_dim, config["dqn"])
     elif model_name == "ppo":
@@ -153,9 +171,23 @@ if __name__ == "__main__":
             # 收集 n_steps rollout
             for t in range(agent.n_steps):
                 actions, log_probs, values = agent.select_action(obs)
+
+                # 保障：動作 shape 必為 (num_envs, action_dim)
+                actions = np.asarray(actions, dtype=np.float32)
+                if actions.ndim == 1:
+                    actions = actions[None, :]
+                assert actions.shape[1] == action_dim, \
+                    f"[shape mismatch] got {actions.shape}, expected (*, {action_dim})"
+                # 也檢查 batch 維
+                if actions.shape[0] != env.num_envs:
+                    # 有些 agent 會回 (action_dim,)；這裡複製到所有 env
+                    if actions.shape == (1, action_dim):
+                        actions = np.repeat(actions, env.num_envs, axis=0)
+                #print(f"[DEBUG] step actions.shape={actions.shape}")  # 期望 (num_envs, action_dim)
+
                 next_obs, rewards, dones, truncs, infos = env.step(actions)
 
-                # === 新增：統一轉成 list[dict] ===
+                # 統一 infos 結構
                 infos_list = split_infos(infos)
 
                 for i in range(len(infos_list)):
@@ -170,62 +202,61 @@ if __name__ == "__main__":
 
             # 更新
             agent.update()
-            """
-            # 在 episode 結束時，直接取 agent.entropy_log 的最新值
+
+            # 紀錄本回合 entropy
             if len(agent.entropy_log) > 0:
                 episode_entropy.append(agent.entropy_log[-1])
-            
-            ep_return = np.mean(daily_returns)
-            final_V = np.mean([info.get("V", init_cash) for info in infos_list])
-            ret_pct = (final_V - init_cash) / init_cash * 100
-
-            all_rewards.append(ep_return)
-            summary.append({"episode": ep, "reward": ep_return, "return_pct": ret_pct})
-            """
-            if len(agent.entropy_log) > 0:
-                avg_entropy = agent.entropy_log[-1]   # 取這個 episode update 的平均熵
-                episode_entropy.append(avg_entropy)
-
 
             final_V = np.mean([info.get("V", init_cash) for info in infos_list])
 
             # episode 的總報酬率
             total_return = (final_V - init_cash) / init_cash
 
-            # 換算成年化 (假設一年 252 個交易日)
+            # 年化（假設一年 252 個交易日）
             days = len(daily_returns) if len(daily_returns) > 0 else 1
             annualized_return = (1 + total_return) ** (252 / days) - 1
 
-            # 轉成百分比顯示
             ep_return = annualized_return * 100
-            ret_pct = ep_return
-
             all_rewards.append(ep_return)
             summary.append({"episode": ep, "annualized_return_pct": ep_return})
-
 
             if ep % save_freq == 0:
                 fig, ax1 = plt.subplots(figsize=(8, 4))
 
-                # 左邊 y 軸：Reward
-                ax1.plot(range(1, len(all_rewards)+1), all_rewards, color="tab:blue", label="Reward")
+                # 左軸：Annualized Return
+                x1 = range(1, len(all_rewards) + 1)
+                ln1, = ax1.plot(
+                    x1, all_rewards, label="Annualized Return (%)",
+                    color="#1f77b4", linewidth=2
+                )
                 ax1.set_xlabel("Episode")
-                ax1.set_ylabel("Total Reward", color="tab:blue")
-                ax1.tick_params(axis="y", labelcolor="tab:blue")
+                ax1.set_ylabel("Annualized Return (%)", color=ln1.get_color())
+                ax1.tick_params(axis="y", colors=ln1.get_color())
+                ax1.grid(True, axis="both", alpha=0.3)
 
-                # 右邊 y 軸：Entropy
+                lines = [ln1]
+                labels = [ln1.get_label()]
+
+                # 右軸：Entropy
                 if len(episode_entropy) > 0:
                     ax2 = ax1.twinx()
-                    ax2.plot(range(1, len(episode_entropy)+1), episode_entropy, color="tab:orange", label="Entropy")
-                    ax2.set_ylabel("Entropy", color="tab:orange")
-                    ax2.tick_params(axis="y", labelcolor="tab:orange")
+                    x2 = range(1, len(episode_entropy) + 1)
+                    ln2, = ax2.plot(
+                        x2, episode_entropy, label="Entropy",
+                        color="#ff7f0e", linewidth=2, linestyle="--"
+                    )
+                    ax2.set_ylabel("Entropy", color=ln2.get_color())
+                    ax2.tick_params(axis="y", colors=ln2.get_color())
+                    lines.append(ln2)
+                    labels.append(ln2.get_label())
 
-                # 標題 & 格式
+                # 合併 legend
+                ax1.legend(lines, labels, loc="best")
+
                 fig.suptitle(f"Training Progress ({model_name})")
                 fig.tight_layout()
-                plt.grid(True)
-                plt.savefig(outdir / "reward_entropy_curve.png")
-                plt.close()
+                fig.savefig(outdir / "reward_entropy_curve.png")
+                plt.close(fig)
 
 
     # === DQN / Random 訓練 (單環境) ===
@@ -252,6 +283,7 @@ if __name__ == "__main__":
                 if done or trunc:
                     break
 
+            # 將日報酬累乘成總報酬
             ep_return = 1.0
             for dr in daily_returns:
                 ep_return *= (1.0 + dr)

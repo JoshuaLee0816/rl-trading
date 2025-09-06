@@ -37,15 +37,15 @@ class StockTradingEnv(gym.Env):
         self,
         df: pd.DataFrame,
         stock_ids,
-        lookback: int = 20, #決定往回看幾天來判斷今天的狀況(可能先抓20接近一個月 可調整)
-        initial_cash: int = 100000,
-        max_holdings: int = None,
-        fee_buy: float = 0.001425 * 0.6,  # 台股手續費 0.1425% * 折扣
-        fee_sell: float = 0.001425 * 0.6,
-        tax_sell: float = 0.003,          # 交易稅 0.3%
-        reward_mode: str = "Total_Profit",
-        action_mode: str = "weights",     # 每次只能拿總資產的25 50 75 100%的其中一些來買? 總資產包括現在持有的股票 但不能超過現金餘額
+        lookback: int,
+        initial_cash: int,
+        max_holdings: int,
+        reward_mode: str,        # 從 config 傳進來
+        action_mode: str,        # 從 config 傳進來
         seed: int = 42,
+        fee_buy: float = 0.001425 * 0.6,
+        fee_sell: float = 0.001425 * 0.6,
+        tax_sell: float = 0.003,
     ):
         super().__init__() #呼叫gym.Env 父類別屬性初始化
 
@@ -63,7 +63,8 @@ class StockTradingEnv(gym.Env):
         self.action_mode = str(action_mode)
         self.rng = np.random.default_rng(seed)
         self.lot_size = 1000 #交易單位先暫訂為1張，不支援零股
-
+        self.min_trade_value = 10000   # 可選：為避免一直小額來回交易，設一個金額閾值（台幣）
+        
         #Basic validataions
         #資料要先從寬表轉成長表 格式如下
         # date        stock_id   open   high   low   close  MA... dividend等等
@@ -126,6 +127,11 @@ class StockTradingEnv(gym.Env):
             # - 第 1 維：股票索引 (0 ~ N-1)
             # - 第 2 維：目標比例等級 (0~3 對應 [25%, 50%, 75%, 100%])
             self.action_space = spaces.MultiDiscrete([self.N, 5])  # 改為含0%，所以5個等級
+
+        elif self.action_mode == "portfolio":
+            self.action_space = gym.spaces.Box(
+            low=0.0, high=1.0, shape=(self.N + 1,), dtype=np.float32
+        )
         else:
             raise NotImplementedError("目前先支援 action_mode='weights'")
 
@@ -156,12 +162,78 @@ class StockTradingEnv(gym.Env):
     
     def _compute_reward(self, V_prev: float, V_new: float) -> float:
         mode = self.reward_mode.lower()
-        if mode == "daily_return": 
-            return 10000*float((V_new - V_prev) / max(1e-9, V_prev))
+        if mode == "daily_return": #還是要一週或是一月的平均return?
+            return float((V_new - V_prev) / max(1e-9, V_prev))
         elif mode == "total_profit":
             return float(V_new - self.initial_cash)
         else: #預設總報酬
             return float(V_new - self.initial_cash)
+    
+    def _normalize_portfolio(self, a: np.ndarray) -> np.ndarray:
+        """
+        將動作向量 a (N+1,) 轉成合法資產配置向量 w：非負且總和=1
+        """
+        a = np.asarray(a, dtype=np.float32).reshape(self.N + 1)
+        a = np.nan_to_num(a, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # 只允許非負
+        a = np.maximum(a, 0.0)
+
+        s = float(a.sum())
+        if s <= 1e-12:
+            # 若全 0，預設全放現金
+            w = np.zeros(self.N + 1, dtype=np.float32)
+            w[-1] = 1.0
+            return w
+        return (a / s).astype(np.float32)
+
+    def _alloc_to_target_shares(self, weights: np.ndarray, prices: np.ndarray,
+                                portfolio_value: float) -> tuple[np.ndarray, float]:
+        """
+        將資產配置 weights (N+1,) 轉為目標股數 (N,) 與目標現金(含未能整股用掉的零頭)
+        weights[:-1] -> 各股比例，weights[-1] -> 現金比例
+        """
+        w_stock = weights[:-1]                         # (N,)
+        w_cash  = float(weights[-1])
+
+        # 目標持股市值（金額）
+        target_stock_value = w_stock * portfolio_value # (N,)
+        # 以收盤價計算目標股數（整股、考慮 lot_size）
+        target_shares = np.floor(
+            np.maximum(0.0, target_stock_value) / np.maximum(prices, 1e-9) / self.lot_size
+        ).astype(np.int64) * self.lot_size            # (N,)
+
+        # 實際佔用的金額（四捨五入後會略小於或等於 target_stock_value）
+        used_value = (target_shares * prices).sum()
+        target_cash = max(0.0, portfolio_value - used_value)
+
+        # 若你希望嚴格讓現金≈w_cash*PV，可在這裡微調（通常不必）
+        return target_shares, target_cash
+
+    # --- lot-size helper: 統一整股規則 ---
+    def _apply_lot(self, shares: int) -> int:
+        """
+        將 shares 依 lot_size 做整股化。
+        - 若已有 self._apply_lot_rules()，優先使用原規則（相容舊邏輯）。
+        - 否則用 lot_size 進行向下取整。
+        """
+        # 基本清理
+        s = int(np.floor(float(shares)))
+        lot = int(getattr(self, "lot_size", 1) or 1)
+        s = max(0, s)
+
+        # 如果原本就有 _apply_lot_rules，就用原本規則
+        if hasattr(self, "_apply_lot_rules") and callable(self._apply_lot_rules):
+            try:
+                return int(self._apply_lot_rules(s))
+            except Exception:
+                pass  # 保險，fallback 到簡單整股
+
+        # 簡單整股：向下取到 lot 的倍數
+        if lot > 1:
+            s = (s // lot) * lot
+        return int(s)
+
     
     """
     小工具結束的部分
@@ -216,18 +288,148 @@ class StockTradingEnv(gym.Env):
     
     #STEP 3 : Step
     def step(self, action):
+        # 沒有明天
         if self._t + 1 >= self.num_days:
             return self._make_obs(self._t), 0.0, True, False, {"msg": "no next day"}
 
+        # 先抓 t+1 開盤/收盤價，估值等共用資料
+        prices_open  = self._prices(self._t + 1, kind="open").astype(np.float64)
+        prices_close = self._prices(self._t + 1, kind="close").astype(np.float64)
+
+        # ====== 分支 1：Portfolio 模式（PPO 用） ======  
+        if self.action_mode == "portfolio":
+            # action: [w_stock(1..N), w_cash]，先正規化為總和=1
+            w = self._normalize_portfolio(action)  # shape (N+1,)
+
+            # 以 t+1 開盤價、目前總資產 V_open 為基準，計算目標股數
+            V_open = float(self._mark_to_market(prices_open))
+            w_stock = w[:-1]                       # 長度 N
+            # 目標金額
+            tgt_values = (w_stock * V_open)        # N,
+            # 轉成目標股數（整股）
+            tgt_shares = np.floor(
+                np.maximum(0.0, tgt_values) / np.maximum(prices_open, 1e-9) / max(1, self.lot_size)
+            ).astype(np.int64) * max(1, self.lot_size)
+
+            # 交易差額
+            delta = tgt_shares - self.shares.astype(np.int64)
+
+            # 先賣後買，避免現金不足
+            exec_shares_total = 0
+            gross_cash_total  = 0
+            fees_tax_total    = 0
+
+            # -------- SELL（先處理負的）--------
+            for i in np.where(delta < 0)[0]:
+                p = float(prices_open[i])
+                if p <= 0: 
+                    continue
+                need = int(-delta[i])
+                hold = int(self.shares[i])
+                raw  = min(hold, need)
+                sell_shares = self._apply_lot(raw)
+                if sell_shares <= 0:
+                    continue
+
+                gross = self._round_currency(sell_shares * p)
+                fee   = self._round_currency(gross * self.fee_sell)
+                tax   = self._round_currency(gross * self.tax_sell)
+                cash_in = gross - fee - tax
+
+                self.shares[i] -= sell_shares
+                self.cash      += cash_in
+
+                exec_shares_total += -sell_shares
+                gross_cash_total  += gross
+                fees_tax_total    += fee + tax
+
+            # -------- BUY（再處理正的）--------
+            for i in np.where(delta > 0)[0]:
+                p = float(prices_open[i])
+                if p <= 0:
+                    continue
+                need = int(delta[i])
+
+                # 依現金上限計算可買股數
+                max_by_cash = int(self.cash // ((1.0 + self.fee_buy) * p))
+                raw = min(need, max_by_cash)
+                buy_shares = self._apply_lot(raw)
+                if buy_shares <= 0:
+                    continue
+
+                gross = self._round_currency(buy_shares * p)
+                fee   = self._round_currency(gross * self.fee_buy)
+                cash_out = gross + fee
+                if cash_out > self.cash:
+                    continue  # 安全檢查：現金不足就跳過（或可再縮單）
+
+                self.shares[i] += buy_shares
+                self.cash      -= cash_out
+
+                exec_shares_total += buy_shares
+                gross_cash_total  += -gross
+                fees_tax_total    += fee
+
+            # --- 收盤估值 & Reward = Total Profit（沿用你的做法） ---
+            V_prev = self.portfolio_value
+            V_new  = float(self._mark_to_market(prices_close))
+            self._prev_portfolio_value = self.portfolio_value
+            self.portfolio_value = V_new
+
+            reward = float(self._compute_reward(V_prev, V_new))
+
+            # 時間前進
+            self._t += 1
+            terminated = (self._t + 1 >= self.num_days)
+            obs = self._make_obs(self._t)
+
+            # === info ===
+            curr_date = self.dates[self._t]
+            prices_c_now = self.prices_close[self._t]
+            V_now = max(1e-9, (self.shares * prices_c_now).sum() + self.cash)
+            w_vec = self._weights_vector(self._t)  # [cash_w, w1, w2, ...]
+            cash_w = float(w_vec[0])
+            stock_w_sum = float(w_vec[1:].sum())
+            held = int((self.shares > 0).sum())
+            w_stocks_now = (self.shares * prices_c_now) / V_now if V_now > 0 else np.zeros(self.N)
+            w_max = float(w_stocks_now.max()) if held > 0 else 0.0
+            stock_value = int((self.shares * prices_c_now).sum())
+
+            # 兼容原本欄位：picked_idx/stock_id 若是 portfolio，就給 -1 / "PORTFOLIO"
+            info = {
+                "V": int(self.portfolio_value),
+                "picked_idx": -1,                      # ### NEW: 兼容欄位
+                "target_w": float(stock_w_sum),        # ### NEW: 這裡給股票總權重
+                "exec_shares": int(exec_shares_total),
+                "gross_cash": int(gross_cash_total),
+                "fees_tax": int(fees_tax_total),
+
+                "date": str(pd.Timestamp(curr_date).date()),
+                "stock_id": "PORTFOLIO",               # ### NEW
+                "price_open": float(np.nan),           # ### NEW
+                "price_close": float(np.nan),          # ### NEW
+                "cash": int(self.cash),
+                "shares_after": int(self.shares.sum()),# ### NEW: 總股數
+                "stock_value": stock_value,
+                "side": "MIXED" if exec_shares_total != 0 else "HOLD",
+                "notional": int(abs(gross_cash_total)),
+                "cash_w": cash_w,
+                "stock_w_sum": stock_w_sum,
+                "held": held,
+                "w_max": w_max,
+
+                # ### 方便追蹤：本步實際的目標配置（股票+現金）
+                "target_weights": w.astype(float).tolist(),
+            }
+            return obs, reward, terminated, False, info
+
+        # ====== 分支 2：DQN 模式（沿用你原本的程式） ======
         idx, lvl = int(action[0]), int(action[1])
         levels = np.array([0.00, 0.25, 0.50, 0.75, 1.00], dtype=np.float64)
         target_w = float(levels[lvl])
 
-        # --- t+1 開盤成交 ---
-        prices_open = self._prices(self._t + 1, kind="open")
         p = float(prices_open[idx])
-
-        V_open = self._mark_to_market(prices_open)
+        V_open = float(self._mark_to_market(prices_open))
         curr_val_i = float(self.shares[idx]) * p
         tgt_val_i  = float(target_w) * float(V_open)
         delta_val  = tgt_val_i - curr_val_i
@@ -235,19 +437,17 @@ class StockTradingEnv(gym.Env):
         exec_shares, gross_cash, fees_tax = 0, 0, 0
 
         if delta_val > 1e-9 and p > 0 and self.cash > 0:
-            # -------- BUY --------
-            # 檢查 max_holdings 限制
+            # BUY
             if self.max_holdings is not None and self.max_holdings > 0:
-                held_count = int((self.shares > 0).sum())     # 目前已持有幾檔
-                already_holding = self.shares[idx] > 0        # 這檔是否已經持有
+                held_count = int((self.shares > 0).sum())
+                already_holding = self.shares[idx] > 0
                 if held_count >= self.max_holdings and not already_holding:
-                    # 已達上限且這檔沒持有 → 禁止買入，但不要 return
                     exec_shares, gross_cash, fees_tax = 0, 0, 0
                 else:
                     max_by_cash = int(self.cash // ((1.0 + self.fee_buy) * p))
                     need_shares = int(delta_val // p)
                     raw_shares = min(max_by_cash, need_shares)
-                    buy_shares = self._apply_lot_rules(raw_shares)
+                    buy_shares = self._apply_lot(raw_shares)
 
                     if buy_shares > 0:
                         gross = self._round_currency(buy_shares * p)
@@ -260,17 +460,15 @@ class StockTradingEnv(gym.Env):
                             gross_cash  = -gross
                             fees_tax    = fee
 
-
         elif delta_val < -1e-9 and p > 0:
             if self.shares[idx] <= 0:
-                #  沒持股卻要賣 → 當 HOLD 處理
                 exec_shares, gross_cash, fees_tax = 0, 0, 0
             else:
-                # -------- SELL --------
+                # SELL
                 hold = int(self.shares[idx])
                 need_sell = int((-delta_val) // p)
                 raw_sell = min(hold, need_sell)
-                sell_shares = self._apply_lot_rules(raw_sell)
+                sell_shares = self._apply_lot(raw_sell)
 
                 if sell_shares > 0:
                     gross = self._round_currency(sell_shares * p)
@@ -283,29 +481,25 @@ class StockTradingEnv(gym.Env):
                     gross_cash  = gross
                     fees_tax    = fee + tax
 
-
-        # --- 收盤估值 & Reward = Total Profit ---
-        prices_close = self._prices(self._t + 1, kind="close")
+        # --- 收盤估值 & Reward ---
         V_prev = self.portfolio_value
-        V_new = self._mark_to_market(prices_close)
+        V_new  = float(self._mark_to_market(prices_close))
         self._prev_portfolio_value = self.portfolio_value
         self.portfolio_value = V_new
 
-        reward = self._compute_reward(V_prev, V_new) #根據reward 的不同計算方法選擇
+        reward = float(self._compute_reward(V_prev, V_new))
 
         # 時間前進
         self._t += 1
         terminated = (self._t + 1 >= self.num_days)
-
         obs = self._make_obs(self._t)
 
-        # 準備補充分步紀錄所需資訊
-        curr_date = self.dates[self._t]                 # 已經前進過 self._t += 1，所以現在是當日（對應 t）
+        # 補充 info（保持你的原格式）
+        curr_date = self.dates[self._t]
         stock_id = self.ids[idx]
         price_o = float(prices_open[idx])
         price_c = float(prices_close[idx])
 
-        # 額外的權重資訊（方便日後分析）
         w_vec = self._weights_vector(self._t)           # [cash_w, w1, w2, ...]
         cash_w = float(w_vec[0])
         stock_w_sum = float(w_vec[1:].sum())
@@ -320,21 +514,19 @@ class StockTradingEnv(gym.Env):
             "V": int(self.portfolio_value),
             "picked_idx": idx,
             "target_w": target_w,
-            "exec_shares": int(exec_shares),   # 買正/賣負
-            "gross_cash": int(gross_cash),     # 毛額（整數元）
-            "fees_tax": int(fees_tax),         # 費稅（整數元）
+            "exec_shares": int(exec_shares),
+            "gross_cash": int(gross_cash),
+            "fees_tax": int(fees_tax),
 
-            # ===== 新增：逐步紀錄需要的欄位 =====
-            "date": str(pd.Timestamp(curr_date).date()),  # "YYYY-MM-DD"
+            "date": str(pd.Timestamp(curr_date).date()),
             "stock_id": stock_id,
             "price_open": price_o,
             "price_close": price_c,
             "cash": int(self.cash),
             "shares_after": int(self.shares[idx]),
-            "stock_value": stock_value,  
+            "stock_value": stock_value,
             "side": ("BUY" if exec_shares > 0 else ("SELL" if exec_shares < 0 else "HOLD")),
-            "notional": int(abs(gross_cash)),   # 成交毛額（正數）
-            # 額外觀察用
+            "notional": int(abs(gross_cash)),
             "cash_w": cash_w,
             "stock_w_sum": stock_w_sum,
             "held": held,
