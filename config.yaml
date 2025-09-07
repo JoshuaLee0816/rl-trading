@@ -19,8 +19,9 @@ environment:
   initial_cash: 100000000                       # 初始資金(十萬)
   lookback: 20                                # 向前看的天數
   reward_mode: "daily_return"                 # 可選 daily_return / total_profit
-  action_mode: "portfolio"                      # MultiDiscrete 動作模式 // Porfolio 分配資產模式
+  action_mode: "discrete"                      # 
   max_holdings: 5                             # 最多同時持有幾檔股票 (目前先做限制備用)
+  qmax_per_trade: 10                     #?????
 
 logging:
   outdir: "logs/runs"                         # 輸出目錄（會自動建立 run_XXXX 資料夾）

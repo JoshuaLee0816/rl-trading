@@ -26,10 +26,10 @@ if str(SRC_DIR) not in sys.path:
 # === 匯入模組 ===
 from rl.models.random_agent import RandomAgent
 from rl.models.dqn_agent import DQNAgent
-from rl.models.ppo_agent import PPOAgent
+from rl.models.old_ppo_agent import PPOAgent
 from rl.models.a2c_agent import A2CAgent
 
-from rl.env.StockTradingEnv import StockTradingEnv
+from rl.env.OLD_StockTradingEnv import StockTradingEnv
 from rl.train.logger import RunLogger
 
 
@@ -135,9 +135,6 @@ if __name__ == "__main__":
         action_dim = single_as.n
     else:
         raise ValueError(f"Unsupported action_space type: {type(single_as)}")
-
-    #print(f"[DEBUG] obs_dim={obs_dim}, action_dim={action_dim}, "
-          #f"single_action_space.shape={single_as.shape}, single_obs_space.shape={single_os.shape}")
 
     if model_name == "random":
         agent = RandomAgent(single_as)

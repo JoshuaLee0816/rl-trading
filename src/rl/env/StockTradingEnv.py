@@ -51,6 +51,8 @@ class StockTradingEnv(gym.Env):
         fee_sell: float = 0.001425 * 0.6,
         tax_sell: float = 0.003,
         lot_size: int = 1000,
+        reward_mode: str = "daily_return",
+        action_mode: str = "discrete"
     ):
         super().__init__()
 
@@ -64,6 +66,7 @@ class StockTradingEnv(gym.Env):
         self.fee_buy, self.fee_sell, self.tax_sell = float(fee_buy), float(fee_sell), float(tax_sell)
         self.lot_size = int(lot_size)
         self.rng = np.random.default_rng(seed)
+        self.reward_mode = reward_mode
 
         df = df.copy().sort_values(["date", "stock_id"]).reset_index(drop=True)
         if not {"date", "stock_id", "open", "close"}.issubset(df.columns):
@@ -141,6 +144,7 @@ class StockTradingEnv(gym.Env):
         - 現金足夠買 1 張（含手續費）
         - 若該檔尚未持有，需符合 max_holdings 名額（held_count < max_holdings）
         - 已持有者可加碼（不受名額限制）
+        - 一天只會執行一個動作，通過遮罩也是候選，後續抽樣
         """
         cost_1lot = np.ceil(p_open * self.lot_size * (1 + self.fee_buy))  # [N]
         has_cash = cost_1lot <= (self.cash + 1e-6)
@@ -199,25 +203,44 @@ class StockTradingEnv(gym.Env):
     # ===================== Gym API =====================
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
+
+        # 初始化時間與資產
         self._t = self.K
         self.cash = float(self.initial_cash)
         self.shares = np.zeros(self.N, dtype=np.int64)
         self.portfolio_value = float(self.initial_cash)
 
+        # 產生初始觀測
         obs = self._make_obs(self._t)
-        info = {"V": int(self.portfolio_value), "action_mask": self._build_action_mask(self._t)}
+
+        # ★ 關鍵：把遮罩放進 info，key 統一為 action_mask_3d
+        #   你的 _build_action_mask(t) 回傳 shape=(3, N, QMAX+1) 的 bool 陣列
+        action_mask_3d = self._build_action_mask(self._t)
+
+        info = {
+            "V": int(self.portfolio_value),
+            "action_mask_3d": action_mask_3d,   # ← 改成這個 key
+        }
         return obs, info
 
+
     def step(self, action):
-        # 沒有下一天就結束
+        # 若沒有下一天就結束：仍回傳當前 obs，reward=0，並提供「終局遮罩」（只允許 HOLD）
         if self._t + 1 >= self.T:
-            return self._make_obs(self._t), 0.0, True, False, {"msg": "no next day"}
+            obs_now = self._make_obs(self._t)
+            info_end = {
+                "msg": "no next day",
+                "V": int(self.portfolio_value),
+                # 統一 key 名稱為 action_mask_3d；_build_action_mask 內部已對 t+1>=T 處理 HOLD-only
+                "action_mask_3d": self._build_action_mask(self._t),
+            }
+            return obs_now, 0.0, True, False, info_end
 
         t = self._t
         p_open  = self.prices_open[t + 1]   # t+1 開盤成交
         p_close = self.prices_close[t + 1]  # t+1 收盤估值
 
-        # 解析 MultiDiscrete 動作
+        # 解析 MultiDiscrete 動作：op ∈ {0:BUY, 1:SELL_ALL, 2:HOLD}
         op, idx, q = int(action[0]), int(action[1]), int(action[2])
 
         # 預設不動
@@ -230,7 +253,7 @@ class StockTradingEnv(gym.Env):
             # BUY: q 張（一次只交易這一檔）
             price = float(p_open[idx])
             lots  = int(q)
-            # 現金保險：再以現金上限約束一次，避免浮點誤差
+            # 現金保險：以現金上限再約束一次，避免浮點誤差
             lots = min(lots, self._max_affordable_lots(price))
             if lots >= 1 and price > 0:
                 shares = lots * self.lot_size
@@ -266,7 +289,12 @@ class StockTradingEnv(gym.Env):
         # 時間推進
         self._t += 1
         terminated = (self._t + 1 >= self.T)
+
         obs = self._make_obs(self._t)
+
+        # 準備下一步的遮罩（若已終局則為 HOLD-only；_build_action_mask 已處理）
+        next_mask = self._build_action_mask(self._t)
+
         info = {
             "V": int(self.portfolio_value),
             "date": str(pd.Timestamp(self.dates[self._t]).date()),
@@ -278,6 +306,7 @@ class StockTradingEnv(gym.Env):
             "fees_tax": int(fees_tax),            # 費用+稅
             "cash": int(round(self.cash)),
             "held": int((self.shares > 0).sum()),
-            "action_mask": self._build_action_mask(self._t),  # 下一步遮罩
+            # ★ 統一 key 名稱：action_mask_3d（shape = (3, N, QMAX+1)）
+            "action_mask_3d": next_mask,
         }
         return obs, reward, terminated, False, info

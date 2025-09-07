@@ -4,83 +4,106 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import platform
-import torch.nn.functional as F
+from torch.distributions import Categorical
 
+LARGE_NEG = -1e9
+
+
+# ===================== Actor / Critic =====================
 class Actor(nn.Module):
-    def __init__(self, obs_dim, action_dim, hidden_dim=256, top_k=20):
+    """
+    輸出「攤平後」的動作 logits 向量：
+      A = N*QMAX + N + 1
+      [0 .. N*QMAX-1] -> BUY(i, q>=1)
+      [N*QMAX .. N*QMAX+N-1] -> SELL_ALL(i)
+      [最後一格] -> HOLD
+    """
+    def __init__(self, obs_dim, num_stocks, qmax, hidden_dim=256):
         super().__init__()
-        self.top_k = top_k
+        self.N = int(num_stocks)
+        self.QMAX = int(qmax)
+        self.action_dim = self.N * self.QMAX + self.N + 1
         self.net = nn.Sequential(
-            nn.Linear(obs_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, action_dim)  # action_dim = 股票數量
+            nn.Linear(obs_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, self.action_dim)
         )
 
-    def forward(self, x):
-        return self.net(x)  # raw scores (not probs)
+    def forward(self, x):  # x: (B, obs_dim)
+        return self.net(x)  # (B, A) raw logits
 
-# === Critic：輸出 state value ===
+
 class Critic(nn.Module):
-    def __init__(self, obs_dim, hidden_dim=64):
+    def __init__(self, obs_dim, hidden_dim=256):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(obs_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
+            nn.Linear(obs_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, 1)
         )
-    def forward(self, x):
-        return self.net(x)  # (B,1)
+    def forward(self, x):  # x: (B, obs_dim)
+        return self.net(x).squeeze(-1)  # (B,)
 
 
-# === Rollout Buffer ===
+# ===================== Rollout Buffer =====================
 class RolloutBuffer:
+    """
+    只存 PPO 需要的最小集合（含 action_mask_flat，更新時重建 masked dist）
+    """
     def __init__(self):
         self.clear()
 
-    def add(self, obs, action, reward, done, log_prob, value):
+    def add(self, obs, action_flat, reward, done, log_prob, value, action_mask_flat):
         self.obs.append(obs)
-        self.actions.append(action)
+        self.actions.append(action_flat)
         self.rewards.append(reward)
         self.dones.append(done)
         self.log_probs.append(log_prob)
         self.values.append(value)
+        self.masks.append(action_mask_flat)
 
     def get(self):
         return (
-            np.array(self.obs),
-            np.array(self.actions),
-            np.array(self.rewards),
-            np.array(self.dones),
-            np.array(self.log_probs),
-            np.array(self.values),
+            np.array(self.obs, dtype=np.float32),
+            np.array(self.actions, dtype=np.int64),
+            np.array(self.rewards, dtype=np.float32),
+            np.array(self.dones, dtype=np.float32),
+            np.array(self.log_probs, dtype=np.float32),
+            np.array(self.values, dtype=np.float32),
+            np.array(self.masks, dtype=np.bool_)  # shape: (T, A)
         )
 
     def clear(self):
         self.obs, self.actions, self.rewards = [], [], []
         self.dones, self.log_probs, self.values = [], [], []
+        self.masks = []
 
 
-# === PPO Agent ===
+# ===================== PPO Agent（攤平動作版） =====================
 class PPOAgent:
-    def __init__(self, obs_dim, action_dim, config):
-        self.obs_dim = obs_dim
-        self.action_dim = action_dim
+    """
+    使用「攤平動作空間」的 PPO：
+      - 需要從 env.info["action_mask"] 取得 (3, N, QMAX+1) 遮罩，並在這裡攤平成 (A,)
+      - select_action 回傳 (action_tuple, action_flat, log_prob, value)
+      - store_transition 請把 action_flat 與 action_mask_flat 存入 buffer
+    """
+    def __init__(self, obs_dim, num_stocks, qmax_per_trade, config):
+        self.obs_dim = int(obs_dim)
+        self.N = int(num_stocks)
+        self.QMAX = int(qmax_per_trade)
+        self.A = self.N * self.QMAX + self.N + 1  # 攤平後動作數
         self.config = config
         self.entropy_log = []
 
         # === Hyperparams ===
-        self.gamma = config.get("gamma")
-        self.lam = config.get("gae_lambda")
-        self.clip_epsilon = config.get("clip_epsilon")
-        self.batch_size = config.get("batch_size")
-        self.n_steps = config.get("n_steps")
-        self.epochs = config.get("epochs")
-        self.entropy_coef = config.get("entropy_coef")
-        self.value_coef = config.get("value_coef")
+        self.gamma         = float(config.get("gamma", 0.99))
+        self.lam           = float(config.get("gae_lambda", 0.95))
+        self.clip_epsilon  = float(config.get("clip_epsilon", 0.2))
+        self.batch_size    = int(config.get("batch_size", 64))
+        self.n_steps       = int(config.get("n_steps", 2048))
+        self.epochs        = int(config.get("epochs", 10))
+        self.entropy_coef  = float(config.get("entropy_coef", 0.0))
+        self.value_coef    = float(config.get("value_coef", 0.5))
 
         # === Device ===
         device_cfg = config.get("device", "auto")
@@ -101,151 +124,159 @@ class PPOAgent:
             self.device = torch.device("cpu")
         print(f"[INFO] Using device: {self.device}")
 
-        # === Networks ===
-        self.actor = Actor(obs_dim, action_dim).to(self.device)
-        self.critic = Critic(obs_dim).to(self.device)
+        # === Networks & Optimizers ===
+        self.actor  = Actor(self.obs_dim, self.N, self.QMAX, hidden_dim=config.get("actor_hidden", 256)).to(self.device)
+        self.critic = Critic(self.obs_dim, hidden_dim=config.get("critic_hidden", 256)).to(self.device)
 
-        # === Optimizers ===
-        self.actor_lr = config["actor_lr"]
-        self.critic_lr = config["critic_lr"]
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.actor_lr)
+        self.actor_lr  = float(config.get("actor_lr", 3e-4))
+        self.critic_lr = float(config.get("critic_lr", 1e-3))
+        self.actor_optimizer  = optim.Adam(self.actor.parameters(),  lr=self.actor_lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_lr)
 
         self.buffer = RolloutBuffer()
-        #("[DEBUG] env obs_dim:", obs_dim)
-        #print("[DEBUG] actor first layer in_features:", self.actor.net[0].in_features)
 
+    # ---------- Action flatten/unflatten helpers ----------
+    def flatten_mask(self, mask3):
+        """
+        (3, N, QMAX+1) -> (A,) 布林向量
+          BUY(i, q>=1)  -> 前 N*QMAX 格
+          SELL_ALL(i)   -> 接著 N 格（用 q=0 那一格）
+          HOLD          -> 最後 1 格（mask[2,0,0]）
+        """
+        if isinstance(mask3, np.ndarray):
+            mask3 = torch.from_numpy(mask3)
+        mask3 = mask3.to(self.device)
 
-    def select_action(self, obs):
-        obs_tensor = torch.tensor(obs, dtype=torch.float32, device=self.device)
-        single = False
-        if obs_tensor.dim() == 1:
-            obs_tensor = obs_tensor.unsqueeze(0)
-            single = True
+        buy  = mask3[0, :, 1:]              # (N, QMAX)
+        sell = mask3[1, :, :1]              # (N, 1)   只取 q=0
+        hold = mask3[2:3, :1, :1].reshape(1)  # (1,)
+        flat = torch.cat([buy.reshape(-1), sell.reshape(-1), hold], dim=0).bool()
+        return flat  # (A,)
 
-        # Actor 輸出 raw scores
-        scores = self.actor(obs_tensor)  # (B, action_dim)
-
-        # Top-k 選股
-        topk_vals, topk_idx = torch.topk(scores, k=self.actor.top_k, dim=-1)
-
-        # 對 top-k 做 softmax
-        topk_probs = torch.softmax(topk_vals, dim=-1)
-
-        # 把 allocation 放回原來的 700 維空間
-        allocations = torch.zeros_like(scores)
-        allocations.scatter_(1, topk_idx, topk_probs)
-
-        # log_prob（cross-entropy 形式）
-        log_probs = (allocations * torch.log(allocations + 1e-8)).sum(dim=-1)
-
-        # Critic value
-        values = self.critic(obs_tensor).squeeze(-1)
-
-        if single:
-            return (
-                allocations[0].detach().cpu().numpy(),
-                log_probs[0].detach().cpu().numpy(),
-                values[0].detach().cpu().numpy(),
-            )
+    def flat_to_tuple(self, a_flat: int):
+        """
+        將攤平類別還原為 (op, idx, q)
+          op: 0=BUY, 1=SELL_ALL, 2=HOLD
+        """
+        A_buy = self.N * self.QMAX
+        if a_flat < A_buy:
+            rel = int(a_flat)
+            idx = rel // self.QMAX
+            q   = (rel % self.QMAX) + 1
+            return (0, idx, q)
+        elif a_flat < A_buy + self.N:
+            idx = int(a_flat - A_buy)
+            return (1, idx, 0)
         else:
-            return (
-                allocations.detach().cpu().numpy(),
-                log_probs.detach().cpu().numpy(),
-                values.detach().cpu().numpy(),
-            )
+            return (2, 0, 0)
 
+    # ---------- Select Action ----------
+    def select_action(self, obs, action_mask_3d):
+        """
+        取得一個動作（抽樣版）：
+          - obs: (obs_dim,)
+          - action_mask_3d: (3, N, QMAX+1)；來自 env.info["action_mask"]
+        回傳：
+          - action_tuple: (op, idx, q)  -> 給 env.step()
+          - action_flat:  int           -> 給 buffer 儲存
+          - log_prob:     float
+          - value:        float
+        """
+        self.actor.eval(); self.critic.eval()
 
-    # === 儲存 transition ===
-    def store_transition(self, obs, action, reward, done, log_prob, value):
-        self.buffer.add(obs, action, reward, done, log_prob, value)
+        # 1) to tensor
+        obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)  # (1, obs_dim)
+        mask_flat = self.flatten_mask(action_mask_3d).unsqueeze(0)                          # (1, A)
 
-    # === 更新 ===
+        # 2) logits -> masked categorical
+        logits = self.actor(obs_t)                   # (1, A)
+        masked_logits = logits.masked_fill(~mask_flat, LARGE_NEG)
+        dist = Categorical(logits=masked_logits)     # 內部會做 softmax
+
+        # 3) sample + log_prob + value
+        a_flat = dist.sample()                       # (1,)
+        logp   = dist.log_prob(a_flat)               # (1,)
+        value  = self.critic(obs_t)                  # (1,)
+
+        # 4) 還原為 (op, idx, q)
+        a_flat_int = int(a_flat.item())
+        action_tuple = self.flat_to_tuple(a_flat_int)
+
+        return (
+            action_tuple,
+            a_flat_int,
+            float(logp.item()),
+            float(value.item()),
+        )
+
+    # ---------- Store transition ----------
+    def store_transition(self, obs, action_flat, reward, done, log_prob, value, action_mask_flat):
+        """
+        action_mask_flat: (A,) 布林向量（建議在互動時就把 3D mask 攤平存起來）
+        """
+        self.buffer.add(obs, action_flat, reward, done, log_prob, value, action_mask_flat)
+
+    # ---------- Update (PPO) ----------
     def update(self):
-        # 取出 buffer 並清空
-        obs, actions, rewards, dones, old_log_probs, values = self.buffer.get()
+        obs, actions, rewards, dones, old_log_probs, values, masks = self.buffer.get()
         self.buffer.clear()
 
-        # 張量化
         device = self.device
-        obs           = torch.tensor(obs, dtype=torch.float32, device=device)
-        actions       = torch.tensor(actions, dtype=torch.float32, device=device)   # allocation 向量（full N 維，top-k 以外通常為 0）
-        rewards       = torch.tensor(rewards, dtype=torch.float32, device=device)
-        dones         = torch.tensor(dones, dtype=torch.float32, device=device)
-        old_log_probs = torch.tensor(old_log_probs, dtype=torch.float32, device=device)
-        values        = torch.tensor(values, dtype=torch.float32, device=device)
+        obs    = torch.tensor(obs,    dtype=torch.float32, device=device)  # (T, obs_dim)
+        acts   = torch.tensor(actions, dtype=torch.long,    device=device) # (T,)
+        rews   = torch.tensor(rewards, dtype=torch.float32, device=device) # (T,)
+        dns    = torch.tensor(dones,   dtype=torch.float32, device=device) # (T,)
+        old_lp = torch.tensor(old_log_probs, dtype=torch.float32, device=device)  # (T,)
+        vals   = torch.tensor(values,  dtype=torch.float32, device=device)        # (T,)
+        masks  = torch.tensor(masks,   dtype=torch.bool,    device=device)        # (T, A)
 
-        # GAE
-        returns, advantages = self._compute_gae(rewards, dones, values)
+        # ---- GAE ----
+        returns, advantages = self._compute_gae(rews, dns, vals)
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        dataset_size = len(obs)
+        N = obs.size(0)
         entropies = []
 
-        # 取得 top-k（與 select_action 保持一致）
-        top_k = getattr(self.actor, "top_k", None)
-        if top_k is None or top_k <= 0:
-            top_k = min(20, self.action_dim)  # 預設一個合理的值，避免未設定
-
         for _ in range(self.epochs):
-            idxs = np.arange(dataset_size)
+            idxs = np.arange(N)
             np.random.shuffle(idxs)
+            for start in range(0, N, self.batch_size):
+                b = idxs[start:start+self.batch_size]
+                b_obs   = obs[b]        # (B, obs_dim)
+                b_acts  = acts[b]       # (B,)
+                b_rets  = returns[b]    # (B,)
+                b_advs  = advantages[b] # (B,)
+                b_oldlp = old_lp[b]     # (B,)
+                b_mask  = masks[b]      # (B, A)
 
-            for start in range(0, dataset_size, self.batch_size):
-                end = start + self.batch_size
-                batch_idx = idxs[start:end]
+                # 新 policy：masked logits -> dist
+                logits = self.actor(b_obs)                         # (B, A)
+                masked_logits = logits.masked_fill(~b_mask, LARGE_NEG)
+                dist = Categorical(logits=masked_logits)
 
-                batch_obs         = obs[batch_idx]             # (B, obs_dim)
-                batch_actions     = actions[batch_idx]         # (B, N)
-                batch_returns     = returns[batch_idx]         # (B,)
-                batch_adv         = advantages[batch_idx]      # (B,)
-                batch_old_logprob = old_log_probs[batch_idx]   # (B,)
-
-                # === 新 policy：scores -> top-k -> softmax -> probs ===
-                logits = self.actor(batch_obs)                 # (B, N)
-                # 取得每列 top-k 的 index 與值
-                topk_vals, topk_idx = torch.topk(logits, k=top_k, dim=-1)          # (B, k), (B, k)
-                topk_probs = torch.softmax(topk_vals, dim=-1)                       # (B, k)
-
-                # 將 top-k 機率 scatter 回 N 維空間，其餘為 0
-                probs = torch.zeros_like(logits)                                     # (B, N)
-                probs.scatter_(1, topk_idx, topk_probs)
-                probs = torch.clamp(probs, min=1e-8)                                 # 避免 log(0)
-
-                # === 熵（只對有效機率計算即可；scatter 後計算全量也等價）===
-                entropy = -(probs * probs.log()).sum(dim=-1).mean()
+                new_logp = dist.log_prob(b_acts)                   # (B,)
+                entropy  = dist.entropy().mean()                   # scalar
                 entropies.append(float(entropy.item()))
 
-                # === log_prob（與 select_action 保持一致：交叉熵形式）===
-                batch_actions = torch.clamp(batch_actions, min=1e-12)
-                batch_actions = batch_actions / batch_actions.sum(dim=-1, keepdim=True)
-                new_log_probs = (batch_actions * probs.log()).sum(dim=-1)            # (B,)
-
-                # === PPO ratio / 損失 ===
-                ratio = torch.exp(new_log_probs - batch_old_logprob)
-                ratio = torch.nan_to_num(ratio, nan=0.0, posinf=1e6, neginf=-1e6)
-
-                surr1 = ratio * batch_adv
-                surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * batch_adv
+                # ratio / PPO clip
+                ratio = torch.exp(new_logp - b_oldlp)              # (B,)
+                surr1 = ratio * b_advs
+                surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * b_advs
                 actor_loss = -torch.min(surr1, surr2).mean() - self.entropy_coef * entropy
 
-                # === Critic ===
-                values_pred = self.critic(batch_obs).squeeze(-1)
-                critic_loss = (batch_returns - values_pred).pow(2).mean()
+                # Critic
+                v_pred = self.critic(b_obs)                        # (B,)
+                critic_loss = (b_rets - v_pred).pow(2).mean() * self.value_coef
 
-                # 保險：防 NaN/Inf
-                actor_loss  = torch.nan_to_num(actor_loss,  nan=0.0, posinf=1e6, neginf=-1e6)
-                critic_loss = torch.nan_to_num(critic_loss, nan=0.0, posinf=1e6, neginf=-1e6)
-
-                # === 反傳與更新 ===
+                # 反傳
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
-                total_loss = actor_loss + self.value_coef * critic_loss
+                total_loss = actor_loss + critic_loss
                 total_loss.backward()
 
-                # Gradient clipping
-                torch.nn.utils.clip_grad_norm_(self.actor.parameters(),  max_norm=0.5)
-                torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=0.5)
+                # 梯度裁切避免爆炸
+                nn.utils.clip_grad_norm_(self.actor.parameters(),  max_norm=0.5)
+                nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=0.5)
 
                 self.actor_optimizer.step()
                 self.critic_optimizer.step()
@@ -253,7 +284,7 @@ class PPOAgent:
         if entropies:
             self.entropy_log.append(float(np.mean(entropies)))
 
-    # === GAE ===
+    # ---------- GAE ----------
     def _compute_gae(self, rewards, dones, values):
         returns, advs = [], []
         gae, next_value = 0.0, 0.0
@@ -263,7 +294,8 @@ class PPOAgent:
             advs.insert(0, gae)
             returns.insert(0, gae + values[t])
             next_value = values[t]
+        device = self.device
         return (
-            torch.tensor(returns, dtype=torch.float32, device=self.device),
-            torch.tensor(advs, dtype=torch.float32, device=self.device),
+            torch.tensor(returns, dtype=torch.float32, device=device),
+            torch.tensor(advs,    dtype=torch.float32, device=device),
         )
