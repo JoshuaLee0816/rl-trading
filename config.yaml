@@ -8,8 +8,8 @@ training:
   grad_steps: 1                           # 每次觸發時連續更新幾次
 
 data:
-  #file: "training_data_20.parquet"
-  file: "training_data_all.parquet"
+  file: "training_data_20.parquet"
+  #file: "training_data_all.parquet"
 
 safety:
   cool_down_every: 200                      # 每多少 episodes 強制休息
@@ -43,13 +43,13 @@ dqn:
 ppo:
   gamma: 0.99
   gae_lambda: 0.95
-  clip_epsilon: 0.2
+  clip_epsilon: 0.1
   actor_lr: 0.0003
   critic_lr: 0.0001
   batch_size: 64
   n_steps: 512
-  epochs: 3
-  entropy_coef: 1.0
+  epochs: 1
+  entropy_coef: 0.2
   value_coef: 0.5
   device: "cpu"
   num_envs: 2
