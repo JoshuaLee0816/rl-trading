@@ -351,6 +351,10 @@ class StockTradingEnv(gym.Env):
         self.portfolio_value = V_new
         reward = float(np.log(max(V_new, 1e-12) / max(V_prev, 1e-12)))
 
+        # 考慮在HOLD的地方加入懲罰? 可行?
+        if side == "HOLD":
+            reward -= 0.0001
+
         # 時間推進
         self._t += 1
         terminated = (self._t + 1 >= self.T)
