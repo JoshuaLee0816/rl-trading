@@ -1,45 +1,45 @@
 training:
-  model: "ppo"                            #控制哪個model跑模型
-  n_episodes: 5000                           # 總訓練集數
-  save_freq: 1                             # 每幾集更新一次 reward_curve.png
-  seed: 42                                  # 隨機種子，方便重現結果
-  update_every: 50                         # 每幾步更新一次
-  warmup_steps: 10000                      # 至少先收 10000 步資料再開始更新
-  grad_steps: 1                           # 每次觸發時連續更新幾次
+  model: "ppo"              # 控制哪個 model 執行
+  n_episodes: 5000          # 總訓練集數
+  save_freq: 1              # 每幾集更新一次 reward_curve.png
+  seed: 42                  # 隨機種子
+  update_every: 50          # 每幾步更新一次
+  warmup_steps: 10000       # 至少先收多少步資料再開始更新
+  grad_steps: 1             # 每次觸發時連續更新幾次
 
 data:
   file: "training_data_20.parquet"
   #file: "training_data_all.parquet"
 
 safety:
-  cool_down_every: 200                      # 每多少 episodes 強制休息
-  sleep_seconds: 120                         # 休息幾秒
+  cool_down_every: 200      # 每多少 episodes 強制休息
+  sleep_seconds: 120        # 休息幾秒
 
 environment:
-  initial_cash: 100000000                       # 初始資金(十萬)
-  lookback: 20                                # 向前看的天數
-  reward_mode: "daily_return"                 # 可選 daily_return / total_profit
-  action_mode: "discrete"                      # 
-  max_holdings: 5                             # 最多同時持有幾檔股票 (目前先做限制備用)
-  qmax_per_trade: 10                     #?????
+  initial_cash: 100000      # 初始資金（十萬）
+  lookback: 20              # 向前看的天數
+  reward_mode: "daily_return"   # 可選 daily_return / total_profit
+  action_mode: "discrete"
+  max_holdings: 5           # 最多同時持有幾檔股票
+  qmax_per_trade: 10        # 單檔股票單次最大交易張數
 
 logging:
-  outdir: "logs/runs"                         # 輸出目錄（會自動建立 run_XXXX 資料夾）
-  save_summary: true                          # 是否存 summary.csv
-  save_trades: False                           # 是否存 trades_all.csv
-  trade_sample_freq: 1                       # 每幾筆交易存一次（logger 控制）
+  outdir: "logs/runs"       # 輸出目錄
+  save_summary: true        # 是否存 summary.csv
+  save_trades: false        # 是否存 trades_all.csv
+  trade_sample_freq: 1      # 每幾筆交易存一次
 
 dqn:
   gamma: 0.99
-  epsilon_schedule: "per_episode"      # "per_episode" | "per_step"
+  epsilon_schedule: "per_episode"   # "per_episode" | "per_step"
   epsilon_start: 1.0
   epsilon_min: 0.05
   epsilon_decay: 0.9995
   lr: 0.0005
   batch_size: 64
   buffer_size: 10000
-  target_update_freq: 100              # 每幾次update就把Q Network 參數複製給target network
-  device: "auto"                          # 可選 "cpu"、"mps"、"cuda"、"auto"
+  target_update_freq: 100
+  device: "auto"           # "cpu"、"mps"、"cuda"、"auto"
 
 ppo:
   gamma: 0.99
@@ -54,7 +54,6 @@ ppo:
   value_coef: 0.5
   device: "cpu"
   num_envs: 2
-  use_subproc: true                     # 用多核心並行
-
-
-
+  use_subproc: true
+  actor_hidden: 64         # Actor 隱藏層維度
+  critic_hidden: 64        # Critic 隱藏層維度
