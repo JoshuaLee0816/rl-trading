@@ -57,7 +57,7 @@ class StockTradingEnv(gym.Env):
     ):
         super().__init__()
 
-        # —— 參數與驗證 ——
+        # 初始化參數
         self.ids = list(stock_ids)
         self.N = len(self.ids)
         self.K = int(lookback)
@@ -69,6 +69,7 @@ class StockTradingEnv(gym.Env):
         self.rng = np.random.default_rng(seed)
         self.reward_mode = reward_mode
 
+        # region 數據檢查
         df = df.copy().sort_values(["date", "stock_id"]).reset_index(drop=True)
         if not {"date", "stock_id", "open", "close"}.issubset(df.columns):
             raise ValueError("df 必須至少包含: ['date','stock_id','open','close']")
@@ -84,34 +85,63 @@ class StockTradingEnv(gym.Env):
         self.T = len(self.dates)
         if self.T <= self.K + 1:
             raise ValueError("資料天數不足（需要 > lookback+1 天）")
+        # endregion 數據檢查
 
-        # 特徵欄位（價量/技術指標等，除了 date/stock_id）
+        # In order to catch the features except date and stock_id 
         self._feat_cols = [c for c in df.columns if c not in ["date", "stock_id"]]
 
-        # 必要價矩陣
+        # convert df's "open" and "close" into 2-dimensions matrix 單獨先處理因為step()都會用到 常要提取
+        """open_pv & close_pv (會產出兩個矩陣)
+        stock_id     2330    2317    2454 ...
+        date
+        2020-01-02   330.0   87.5    290.0 ...
+        2020-01-03   335.5   88.0    293.0 ...
+        ...
+        """
+
         open_pv  = df.pivot(index="date", columns="stock_id", values="open").reindex(index=self.dates, columns=self.ids)
         close_pv = df.pivot(index="date", columns="stock_id", values="close").reindex(index=self.dates, columns=self.ids)
         self.prices_open  = open_pv.to_numpy(dtype=np.float64)   # [T, N]
         self.prices_close = close_pv.to_numpy(dtype=np.float64)  # [T, N]
 
-        # 全特徵 3D -> numpy
-        feat_mats = []
+        # 全特徵 3D -> numpy 
+        """
+        每個特徵都會變成 [T *N]
+        全部疊起來 變成 [T*N* features總數]
+        """
+        feat_mats = []     #專門存放每個特徵轉換後的矩陣
         for c in self._feat_cols:
             pv = df.pivot(index="date", columns="stock_id", values=c).reindex(index=self.dates, columns=self.ids)
-            feat_mats.append(pv.to_numpy(dtype=np.float64)[..., None])   # [T, N, 1]
+            feat_mats.append(pv.to_numpy(dtype=np.float32)[..., None])   # [T, N, 1]
         self.features = np.concatenate(feat_mats, axis=2) if feat_mats else np.zeros((self.T, self.N, 0))
 
-        # 狀態
+        # 狀態 (用來描述當前狀態的變數)
+        """
+        _t => 模擬到第幾天
+        cash => 現金餘額多少
+        shares => shares[i] 第i檔股票手上現在有幾股
+        portfolio_value => total assets current
+        """
         self._t = None
         self.cash = None
         self.shares = None
         self.portfolio_value = None
 
-        # 空間：obs = [K*N*F] + [1+N]
-        obs_dim = self.N * self.features.shape[2] * self.K + (1 + self.N)
+        # 定義環境的觀測空間
+        """
+        [K *N *F] => observation是 "最近K天,N檔股票, 每檔有F個特徵" 攤平成一個向量
+        """
+        obs_dim = self.N * self.features.shape[2] * self.K + (1 + self.N)    #obs_dim是一個 一維向量
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32)
-        # 動作：op, idx, q
-        self.action_space = spaces.MultiDiscrete([3, self.N, self.QMAX + 1])
+
+        # 定義動作空間 三維 [操作類型, idx哪一檔, q數量] EX:[1,5,3]= 買入 第 5 檔股票 3 張
+        """
+        操作類型:
+        0 = 不動作 (hold)
+        1 = 買入 (buy)
+        2 = 賣出 (sell)
+        """
+        self.action_space = spaces.MultiDiscrete([3, self.N, self.QMAX + 1])    #QMax +1 因為有可能有0
 
     # endregion 初始化部分
 
@@ -317,4 +347,3 @@ class StockTradingEnv(gym.Env):
         return obs, reward, terminated, False, info
 
     # endregion GymAPI
-    
