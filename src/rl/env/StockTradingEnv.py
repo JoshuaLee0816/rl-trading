@@ -236,6 +236,11 @@ class StockTradingEnv(gym.Env):
     # endregion 小工具部分
 
     # region GymAPI
+    """
+    reset => 把環境歸零 準備新的episode
+    Gymnasium標準API => args: seed, options
+    * 必須用關鍵字指定，不能用位置參數
+    """
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
 
@@ -247,14 +252,13 @@ class StockTradingEnv(gym.Env):
 
         # 產生初始觀測
         obs = self._make_obs(self._t)
-
-        # ★ 關鍵：把遮罩放進 info，key 統一為 action_mask_3d
-        #   你的 _build_action_mask(t) 回傳 shape=(3, N, QMAX+1) 的 bool 陣列
+        
+        # mask 擋住不合法動作 (現金不足不能購買)
         action_mask_3d = self._build_action_mask(self._t)
 
         info = {
-            "V": int(self.portfolio_value),
-            "action_mask_3d": action_mask_3d,   # ← 改成這個 key
+            "V": int(self.portfolio_value),  #回傳當前投資組合 total asset
+            "action_mask_3d": action_mask_3d,   #回傳action mask的時候action 分布還沒有出來 只是單純的擋住不合法 分布要靠ppo agent產出?
         }
         return obs, info
 
