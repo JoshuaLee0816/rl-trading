@@ -29,6 +29,13 @@ class Actor(nn.Module):
             nn.Linear(hidden_dim, self.action_dim)
         )
 
+        # 初始化的時候標準化network 才不會讓初始化太大
+        for layer in self.net:
+            if isinstance(layer, nn.Linear):
+                nn.init.xavier_uniform_(layer.weight, gain=0.01)
+                nn.init.zeros_(layer.bias)
+
+
     def forward(self, x):  # x: (B, obs_dim)
         return self.net(x)  # (B, A) raw logits 這些logits再轉乘categorical (logits = ...)動作分布
 
@@ -206,8 +213,9 @@ class PPOAgent:
         """
         self.actor.eval(); self.critic.eval()
 
-        # 1) to tensor
+        # 1) to tensor & normalized
         obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)  # obs 轉成tensor shape = (1, obs_dim)
+        obs_t = (obs_t - obs_t.mean()) / (obs_t.std() + 1e-8)                               # 送進網路錢先進行標準化obs
         mask_flat = self.flatten_mask(action_mask_3d).unsqueeze(0)                          # 只允許True in Mask
 
         # 2) logits -> masked categorical
@@ -322,6 +330,13 @@ class PPOAgent:
 
         # endregion 小批次更新(mini-batch SGD)
         
+        """
+        print("mask合法數:", b_mask[0].sum().item())
+        print("logits:", logits[0,:10].detach().cpu().numpy())  # 前10個動作
+        print("probs:", dist.probs[0,:10].detach().cpu().numpy())  # 前10個動作機率
+        print("entropy:", dist.entropy()[0].item())
+        """
+
         if entropies:
             self.entropy_log.append(float(np.mean(entropies)))
     # endregion Update (PPO)

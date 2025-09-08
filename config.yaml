@@ -16,7 +16,7 @@ safety:
   sleep_seconds: 120        # 休息幾秒
 
 environment:
-  initial_cash: 100000      # 初始資金（十萬）
+  initial_cash: 10000000      # 初始資金（十萬）
   lookback: 20              # 向前看的天數
   reward_mode: "daily_return"   # 可選 daily_return / total_profit
   action_mode: "discrete"
@@ -45,8 +45,8 @@ ppo:
   gamma: 0.99
   gae_lambda: 0.95
   clip_epsilon: 0.1
-  actor_lr: 0.0003
-  critic_lr: 0.0001
+  actor_lr: 0.000003
+  critic_lr: 0.000001
   batch_size: 64
   n_steps: 512
   epochs: 1

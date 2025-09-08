@@ -254,7 +254,6 @@ if __name__ == "__main__":
                 obs = next_obs
                 daily_returns.extend(rewards.tolist())
 
-
             # 更新
             agent.update()
 
@@ -265,11 +264,19 @@ if __name__ == "__main__":
             final_V = np.mean([info.get("V", init_cash) for info in infos_list])
 
             # episode 的總報酬率
+            """
             total_return = (final_V - init_cash) / init_cash
 
             # 年化（假設一年 252 個交易日）
             days = len(daily_returns) if len(daily_returns) > 0 else 1
             annualized_return = (1 + total_return) ** (252 / days) - 1
+
+            """
+
+            R_total = np.sum(daily_returns)
+            total_return = np.exp(R_total) -1
+            days = len(daily_returns) if len(daily_returns) > 0 else 1
+            annualized_return = (1 + total_return ) ** (252/days) - 1
 
             ep_return = annualized_return * 100
             all_rewards.append(ep_return)
