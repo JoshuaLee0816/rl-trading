@@ -51,7 +51,7 @@ class StockTradingEnv(gym.Env):
         fee_buy: float = 0.001425 * 0.6,
         fee_sell: float = 0.001425 * 0.6,
         tax_sell: float = 0.003,
-        lot_size: int = 1000,
+        lot_size: int = 1000,       #一張 = 1000股
         reward_mode: str = "daily_return",
         action_mode: str = "discrete"
     ):
@@ -281,34 +281,53 @@ class StockTradingEnv(gym.Env):
         p_open  = self.prices_open[t + 1]   # t+1 開盤成交
         p_close = self.prices_close[t + 1]  # t+1 收盤估值
 
-        # 解析 MultiDiscrete 動作：op ∈ {0:BUY, 1:SELL_ALL, 2:HOLD}
+        # 把agent傳進來的動作向量action 拆成三個部分 op, idx, q
+        """
+        Agent 已經決定好要做哪一檔的哪一個動作了
+        """
         op, idx, q = int(action[0]), int(action[1]), int(action[2])
 
-        # 預設不動
+        # 預設不動 (還沒有合法Mask前先不動)
         side, exec_shares, gross_cash, fees_tax = "HOLD", 0, 0, 0
 
-        # 讀取合法遮罩；若動作不合法 → 視為 HOLD（不懲罰，穩定訓練）
+        # 讀取合法遮罩；若動作不合法 視為 HOLD
+        """
+        目前設定為每次只做一個動作，所以如果被遮罩掉了 就是沒有動作=HOLD (可以之後改成不只一個動作(候選動作)或是把初始資金拉高(不建議))
+        """
         mask = self._build_action_mask(t)
 
-        if op == 0 and 0 <= idx < self.N and 1 <= q <= self.QMAX and mask[0, idx, q]:
+        if op == 0 and 0 <= idx < self.N and 1 <= q <= self.QMAX and mask[0, idx, q]: 
+            """
+            mask確定合法True的動作才會進入,且至少買一張不超過上限qmax
+            """
             # BUY: q 張（一次只交易這一檔）
             price = float(p_open[idx])
-            lots  = int(q)
-            # 現金保險：以現金上限再約束一次，避免浮點誤差
+            lots  = int(q)   #一張=lot size的股數 這裡設為1000
+
+            # 以現金上限再約束一次，避免浮點誤差
             lots = min(lots, self._max_affordable_lots(price))
+
             if lots >= 1 and price > 0:
+                """
+                shares = 實際買的股數（張數 × 每張股數）。
+                gross = 總成交金額（股數 × 單價）。
+                fee = 手續費（買進手續費）。
+                cash_out = 總現金流出 = 成交金額 + 手續費。
+                """
                 shares = lots * self.lot_size
-                gross  = int(round(shares * price))
+                gross  = int(round(shares * price)) 
                 fee    = int(round(gross * self.fee_buy))
                 cash_out = gross + fee
-                if cash_out <= self.cash + 1e-6:
+
+                if cash_out <= self.cash + 1e-6:   #現金夠的情況下更新持股數量,現金,並更新交易紀錄
                     self.shares[idx] += shares
                     self.cash        -= cash_out
                     side, exec_shares, gross_cash, fees_tax = "BUY", shares, -gross, fee
 
-        elif op == 1 and 0 <= idx < self.N and mask[1, idx, 0]:
+        elif op == 1 and 0 <= idx < self.N and mask[1, idx, 0]:  #賣出全部股票情況
             # SELL_ALL: 只賣該 idx 一檔的全部
             shares = int(self.shares[idx])
+
             if shares > 0 and p_open[idx] > 0:
                 price = float(p_open[idx])
                 gross = int(round(shares * price))
@@ -322,6 +341,11 @@ class StockTradingEnv(gym.Env):
         # HOLD：其他情況不動
 
         # 估值 & 報酬（log-return）
+        """
+        Vprev = 上一期的total asset
+        Vnew  = 新的total asset
+        reward = 對數報酬 log(V_new/V_prev)
+        """
         V_prev = float(self.portfolio_value)
         V_new  = float(self._mark_to_market(p_close))
         self.portfolio_value = V_new
@@ -331,7 +355,7 @@ class StockTradingEnv(gym.Env):
         self._t += 1
         terminated = (self._t + 1 >= self.T)
 
-        obs = self._make_obs(self._t)
+        obs = self._make_obs(self._t) #新obs給下一個agent決策用
 
         # 準備下一步的遮罩（若已終局則為 HOLD-only；_build_action_mask 已處理）
         next_mask = self._build_action_mask(self._t)
@@ -347,9 +371,8 @@ class StockTradingEnv(gym.Env):
             "fees_tax": int(fees_tax),            # 費用+稅
             "cash": int(round(self.cash)),
             "held": int((self.shares > 0).sum()),
-            # ★ 統一 key 名稱：action_mask_3d（shape = (3, N, QMAX+1)）
             "action_mask_3d": next_mask,
         }
-        return obs, reward, terminated, False, info
+        return obs, reward, terminated, False, info   #回傳Step結果
 
     # endregion GymAPI
