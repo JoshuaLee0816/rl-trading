@@ -1,11 +1,11 @@
 training:
   model: "ppo"              # 控制哪個 model 執行
   n_episodes: 5000          # 總訓練集數
-  save_freq: 20              # 每幾集更新一次 reward_curve.png
+  save_freq: 5              # 每幾集更新一次 reward_curve.png
   seed: 42                  # 隨機種子
-  update_every: 2048          # 每幾步更新一次 為什麼要建議對齊？
+  update_every: 512          # 每幾步更新一次 為什麼要建議對齊？
   warmup_steps: 10000       # 至少先收多少步資料再開始更新
-  grad_steps: 5            # 每次觸發時連續更新幾次
+  grad_steps: 2            # 每次觸發時連續更新幾次
 
 data:
   file: "training_data_20.parquet"
@@ -17,7 +17,7 @@ safety:
 
 environment:
   initial_cash: 100000      # 初始資金（十萬）
-  lookback: 30              # 向前看的天數
+  lookback: 20              # 向前看的天數
   reward_mode: "daily_return"   # 可選 daily_return / total_profit
   action_mode: "discrete"
   max_holdings: 5           # 最多同時持有幾檔股票
@@ -48,12 +48,12 @@ ppo:
   actor_lr: 0.0003
   critic_lr: 0.001      #到底actor critic哪個係數大合適？
   batch_size: 64
-  n_steps: 2048
-  epochs: 1
-  entropy_coef: 0.2
+  n_steps: 512
+  epochs: 3
+  entropy_coef: 0.1
   value_coef: 0.5
   device: "cpu"
   num_envs: 6
   use_subproc: true
-  actor_hidden: 128         # Actor 隱藏層維度
-  critic_hidden: 64        # Critic 隱藏層維度
+  actor_hidden: 64         # Actor 隱藏層維度
+  critic_hidden: 32        # Critic 隱藏層維度

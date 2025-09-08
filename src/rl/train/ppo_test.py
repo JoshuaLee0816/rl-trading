@@ -6,6 +6,7 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 import sys
 import yaml
 import matplotlib.pyplot as plt
+import numpy as np
 from pathlib import Path
 import pandas as pd
 import datetime
@@ -324,12 +325,23 @@ if __name__ == "__main__":
                 fig, ax = plt.subplots(figsize=(8, 4))
                 x = range(1, len(agent.actor_loss_log) + 1)
 
-                ax.plot(x, agent.actor_loss_log, label="Actor Loss", color="blue", linewidth=1)
-                ax.plot(x, agent.critic_loss_log, label="Critic Loss", color="red", linewidth=1)
+                # ---- 加上移動平均平滑 ----
+                def moving_average(data, window=100):
+                    if len(data) < window:
+                        return data
+                    return np.convolve(data, np.ones(window)/window, mode="valid")
+
+                actor_smooth = moving_average(agent.actor_loss_log, window=100)
+                critic_smooth = moving_average(agent.critic_loss_log, window=100)
+                x_smooth = range(1, len(actor_smooth) + 1)
+
+                # ---- 繪圖 ----
+                ax.plot(x_smooth, actor_smooth, label="Actor Loss (smoothed)", color="blue", linewidth=1)
+                ax.plot(x_smooth, critic_smooth, label="Critic Loss (smoothed)", color="red", linewidth=1)
 
                 ax.set_xlabel("Update Step")
                 ax.set_ylabel("Loss")
-                ax.set_title("Actor & Critic Loss Curve")
+                ax.set_title("Actor & Critic Loss Curve (Smoothed)")
                 ax.legend()
                 ax.grid(alpha=0.3)
 
