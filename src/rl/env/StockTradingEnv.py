@@ -38,6 +38,7 @@ class StockTradingEnv(gym.Env):
 
     metadata = {"render_modes": ["human"]}
 
+    # region 初始化部分
     def __init__(
         self,
         df: pd.DataFrame,          # 長表: [date, stock_id, open, close, ...features]
@@ -112,7 +113,9 @@ class StockTradingEnv(gym.Env):
         # 動作：op, idx, q
         self.action_space = spaces.MultiDiscrete([3, self.N, self.QMAX + 1])
 
-    # ===================== Utilities =====================
+    # endregion 初始化部分
+
+    # region 小工具部分
     def _mark_to_market(self, prices: np.ndarray) -> float:
         return float((self.shares * prices).sum() + self.cash)
 
@@ -137,7 +140,7 @@ class StockTradingEnv(gym.Env):
         obs = np.concatenate([feats, weights]).astype(np.float32)
         return np.clip(obs, -1e6, 1e6)
 
-    # —— 合法化遮罩（不做門檻與懲罰） ——
+        # —— 合法化遮罩（不做門檻與懲罰） ——
     def _buy_mask(self, p_open: np.ndarray) -> np.ndarray:
         """
         回傳對每檔股票「可買至少 1 張」的布林向量 [N]
@@ -199,8 +202,10 @@ class StockTradingEnv(gym.Env):
         # HOLD
         mask[2, 0, 0] = True
         return mask
+    
+    # endregion 小工具部分
 
-    # ===================== Gym API =====================
+    # region GymAPI
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
 
@@ -310,3 +315,6 @@ class StockTradingEnv(gym.Env):
             "action_mask_3d": next_mask,
         }
         return obs, reward, terminated, False, info
+
+    # endregion GymAPI
+    

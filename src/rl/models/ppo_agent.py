@@ -12,11 +12,9 @@ LARGE_NEG = -1e9
 # ===================== Actor / Critic =====================
 class Actor(nn.Module):
     """
-    輸出「攤平後」的動作 logits 向量：
-      A = N*QMAX + N + 1
-      [0 .. N*QMAX-1] -> BUY(i, q>=1)
-      [N*QMAX .. N*QMAX+N-1] -> SELL_ALL(i)
-      [最後一格] -> HOLD
+    輸出動作action _dim
+
+    EX -> N = 2, Qmax = 3, 這樣會是6格 + Sell_All 一格 + HOLD 1格 ，所以action dim = 8格 (N*Qmax + 1 + 1)
     """
     def __init__(self, obs_dim, num_stocks, qmax, hidden_dim=256):
         super().__init__()
@@ -24,13 +22,15 @@ class Actor(nn.Module):
         self.QMAX = int(qmax)
         self.action_dim = self.N * self.QMAX + self.N + 1
         self.net = nn.Sequential(
-            nn.Linear(obs_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(obs_dim, hidden_dim), 
+            nn.ReLU(), #block negative signal (Shall I change to Tanh()??)
+            nn.Linear(hidden_dim, hidden_dim), 
+            nn.ReLU(),
             nn.Linear(hidden_dim, self.action_dim)
         )
 
     def forward(self, x):  # x: (B, obs_dim)
-        return self.net(x)  # (B, A) raw logits
+        return self.net(x)  # (B, A) raw logits 這些logits再轉乘categorical (logits = ...)動作分布
 
 
 class Critic(nn.Module):
@@ -39,15 +39,16 @@ class Critic(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(obs_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, 1)
+            nn.Linear(hidden_dim, 1)   #輸出1dim =>某個狀態的評估價值
         )
-    def forward(self, x):  # x: (B, obs_dim)
+    def forward(self, x):  # x: (B, obs_dim) (B是Bacth size, 然後去掉最後一dim可以計算loss)
         return self.net(x).squeeze(-1)  # (B,)
 
 
 # ===================== Rollout Buffer =====================
 class RolloutBuffer:
     """
+    因為PPO是 On-policy, 必須用當前的policy來產生動作得到資料, and RolloutBuffer is something like register in this model.
     只存 PPO 需要的最小集合（含 action_mask_flat，更新時重建 masked dist）
     """
     def __init__(self):
