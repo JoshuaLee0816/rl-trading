@@ -192,7 +192,7 @@ class PPOAgent:
         
     # endregion 一維 unflatten 還原成 三維
 
-    # ---------- Select Action ----------
+    # region Select action 
     def select_action(self, obs, action_mask_3d):
         """
         取得一個動作（抽樣版）：
@@ -207,50 +207,66 @@ class PPOAgent:
         self.actor.eval(); self.critic.eval()
 
         # 1) to tensor
-        obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)  # (1, obs_dim)
-        mask_flat = self.flatten_mask(action_mask_3d).unsqueeze(0)                          # (1, A)
+        obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)  # obs 轉成tensor shape = (1, obs_dim)
+        mask_flat = self.flatten_mask(action_mask_3d).unsqueeze(0)                          # 只允許True in Mask
 
         # 2) logits -> masked categorical
+        """
+        logits = Actor 對所有動作的raw 分數
+        """
         logits = self.actor(obs_t)                   # (1, A)
-        masked_logits = logits.masked_fill(~mask_flat, LARGE_NEG)
-        dist = Categorical(logits=masked_logits)     # 內部會做 softmax
+        masked_logits = logits.masked_fill(~mask_flat, LARGE_NEG) #把非法動作設成極小值，這樣softmax後幾乎是0
+        dist = Categorical(logits=masked_logits)     # 內部會做 softmax,建立一個類別分布物件，方便抽樣與計算log_prob
 
         # 3) sample + log_prob + value
-        a_flat = dist.sample()                       # (1,)
-        logp   = dist.log_prob(a_flat)               # (1,)
-        value  = self.critic(obs_t)                  # (1,)
+        a_flat = dist.sample()                       # 從分布中抽樣出一個動作
+        logp   = dist.log_prob(a_flat)               # 該動作的對數機率,更新PPO會用到
+        value  = self.critic(obs_t)                  # value 預測in Critic
 
         # 4) 還原為 (op, idx, q)
         a_flat_int = int(a_flat.item())
         action_tuple = self.flat_to_tuple(a_flat_int)
 
         return (
-            action_tuple,
-            a_flat_int,
+            action_tuple,       #給env.step()
+            a_flat_int,         #給buffer 儲存
             float(logp.item()),
-            float(value.item()),
+            float(value.item()), #算advantages
         )
 
-    # ---------- Store transition ----------
+    # endregion Select action 
+
+    # region Store transition into Rollout Buffer 
+    """
+    EX
+    {
+        "obs": [0.3, -0.1, 1.2],
+        "action": 17,
+        "reward": 0.05,
+        "done": False,
+        "log_prob": -2.35,
+        "value": 0.12,
+        "mask": [False, True, ..., False]
+        }
+    """
     def store_transition(self, obs, action_flat, reward, done, log_prob, value, action_mask_flat):
-        """
-        action_mask_flat: (A,) 布林向量（建議在互動時就把 3D mask 攤平存起來）
-        """
         self.buffer.add(obs, action_flat, reward, done, log_prob, value, action_mask_flat)
 
-    # ---------- Update (PPO) ----------
+    # endregion Store transition into Rollout Buffer 
+
+    # region Update (PPO)
     def update(self):
-        obs, actions, rewards, dones, old_log_probs, values, masks = self.buffer.get()
-        self.buffer.clear()
+        obs, actions, rewards, dones, old_log_probs, values, masks = self.buffer.get()  #get rollout buffer 裡面全部的資料
+        self.buffer.clear()                                                             #清空準備下一次蒐集
 
         device = self.device
-        obs    = torch.tensor(obs,    dtype=torch.float32, device=device)  # (T, obs_dim)
-        acts   = torch.tensor(actions, dtype=torch.long,    device=device) # (T,)
-        rews   = torch.tensor(rewards, dtype=torch.float32, device=device) # (T,)
-        dns    = torch.tensor(dones,   dtype=torch.float32, device=device) # (T,)
-        old_lp = torch.tensor(old_log_probs, dtype=torch.float32, device=device)  # (T,)
-        vals   = torch.tensor(values,  dtype=torch.float32, device=device)        # (T,)
-        masks  = torch.tensor(masks,   dtype=torch.bool,    device=device)        # (T, A)
+        obs    = torch.tensor(obs,    dtype=torch.float32, device=device)  
+        acts   = torch.tensor(actions, dtype=torch.long,    device=device) 
+        rews   = torch.tensor(rewards, dtype=torch.float32, device=device) 
+        dns    = torch.tensor(dones,   dtype=torch.float32, device=device) 
+        old_lp = torch.tensor(old_log_probs, dtype=torch.float32, device=device)  
+        vals   = torch.tensor(values,  dtype=torch.float32, device=device)        
+        masks  = torch.tensor(masks,   dtype=torch.bool,    device=device)        
 
         # ---- GAE ----
         returns, advantages = self._compute_gae(rews, dns, vals)
@@ -259,6 +275,7 @@ class PPOAgent:
         N = obs.size(0)
         entropies = []
 
+        # region 小批次更新(mini-batch SGD)
         for _ in range(self.epochs):
             idxs = np.arange(N)
             np.random.shuffle(idxs)
@@ -303,10 +320,12 @@ class PPOAgent:
                 self.actor_optimizer.step()
                 self.critic_optimizer.step()
 
+        # endregion 小批次更新(mini-batch SGD)
+        
         if entropies:
             self.entropy_log.append(float(np.mean(entropies)))
+    # endregion Update (PPO)
 
-    # ---------- GAE ----------
     def _compute_gae(self, rewards, dones, values):
         returns, advs = [], []
         gae, next_value = 0.0, 0.0
