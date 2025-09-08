@@ -88,11 +88,12 @@ class PPOAgent:
       - select_action 回傳 (action_tuple, action_flat, log_prob, value)
       - store_transition 請把 action_flat 與 action_mask_flat 存入 buffer
     """
+    # region PPO 初始化
     def __init__(self, obs_dim, num_stocks, qmax_per_trade, config):
         self.obs_dim = int(obs_dim)
         self.N = int(num_stocks)
-        self.QMAX = int(qmax_per_trade)
-        self.A = self.N * self.QMAX + self.N + 1  # 攤平後動作數
+        self.QMAX = int(qmax_per_trade)           # 現實中買幾張其實跟金額有關，但這裡限制大概在10張只是為了要縮小維度 
+        self.A = self.N * self.QMAX + self.N + 1  # 動作空間攤平成一維後的大小 (用於policy network 輸出成Logits)
         self.config = config
         self.entropy_log = []
 
@@ -106,7 +107,8 @@ class PPOAgent:
         self.entropy_coef  = float(config.get("entropy_coef", 0.0))
         self.value_coef    = float(config.get("value_coef", 0.5))
 
-        # === Device ===
+        # region 選擇device
+
         device_cfg = config.get("device", "auto")
         if device_cfg == "cpu":
             self.device = torch.device("cpu")
@@ -125,18 +127,22 @@ class PPOAgent:
             self.device = torch.device("cpu")
         print(f"[INFO] Using device: {self.device}")
 
-        # === Networks & Optimizers ===
-        self.actor  = Actor(self.obs_dim, self.N, self.QMAX, hidden_dim=config.get("actor_hidden", 256)).to(self.device)
-        self.critic = Critic(self.obs_dim, hidden_dim=config.get("critic_hidden", 256)).to(self.device)
+        # endregion 選擇device
 
-        self.actor_lr  = float(config.get("actor_lr", 3e-4))
-        self.critic_lr = float(config.get("critic_lr", 1e-3))
+        # Actor Critic Optimizer初始化
+        self.actor  = Actor(self.obs_dim, self.N, self.QMAX, hidden_dim=config.get("actor_hidden")).to(self.device)
+        self.critic = Critic(self.obs_dim, hidden_dim=config.get("critic_hidden")).to(self.device)
+
+        self.actor_lr  = float(config.get("actor_lr"))
+        self.critic_lr = float(config.get("critic_lr"))
         self.actor_optimizer  = optim.Adam(self.actor.parameters(),  lr=self.actor_lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_lr)
 
         self.buffer = RolloutBuffer()
 
-    # ---------- Action flatten/unflatten helpers ----------
+    # endregion PPO 初始化
+
+    # region 三維動作mask flat成一維的工具
     def flatten_mask(self, mask3):
         """
         (3, N, QMAX+1) -> (A,) 布林向量
@@ -145,15 +151,28 @@ class PPOAgent:
           HOLD          -> 最後 1 格（mask[2,0,0]）
         """
         if isinstance(mask3, np.ndarray):
-            mask3 = torch.from_numpy(mask3)
+            mask3 = torch.from_numpy(mask3) #確保轉成Torch tensor放到同一個裝置(CPU/CUDA/MPS)
         mask3 = mask3.to(self.device)
 
-        buy  = mask3[0, :, 1:]              # (N, QMAX)
-        sell = mask3[1, :, :1]              # (N, 1)   只取 q=0
-        hold = mask3[2:3, :1, :1].reshape(1)  # (1,)
-        flat = torch.cat([buy.reshape(-1), sell.reshape(-1), hold], dim=0).bool()
-        return flat  # (A,)
+        buy  = mask3[0, :, 1:]              # 取出所有buy的動作
+        sell = mask3[1, :, :1]              # 取出所有sell的動作
+        hold = mask3[2:3, :1, :1].reshape(1)  # 取出所有hold的動作
+        flat = torch.cat([buy.reshape(-1), sell.reshape(-1), hold], dim=0).bool() #三段攤平
 
+        """
+        [ BUY(stock0, q=1), BUY(stock0, q=2), BUY(stock0, q=3), SELL_ALL(stock0), SELL_ALL(stock1), HOLD ]
+        現在HOLD就會全部都HOLD 要謹慎思考 我怕HOLD太容易導致都不進行交易
+        """
+        return flat  # (A,)
+    
+    # endregion 三維動作mask flat成一維的工具
+
+    # region 一維 unflatten 還原成 三維
+    """
+    這樣做的原因：
+    Torch 的 policy gradient (比如 categorical 分布）最容易處理 一維分類問題
+    但是StockTradingEnv 的 step() 期待的動作格式是三維
+    """
     def flat_to_tuple(self, a_flat: int):
         """
         將攤平類別還原為 (op, idx, q)
@@ -170,6 +189,8 @@ class PPOAgent:
             return (1, idx, 0)
         else:
             return (2, 0, 0)
+        
+    # endregion 一維 unflatten 還原成 三維
 
     # ---------- Select Action ----------
     def select_action(self, obs, action_mask_3d):
