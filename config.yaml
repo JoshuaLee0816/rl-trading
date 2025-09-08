@@ -1,23 +1,23 @@
 training:
   model: "ppo"              # 控制哪個 model 執行
   n_episodes: 5000          # 總訓練集數
-  save_freq: 1              # 每幾集更新一次 reward_curve.png
+  save_freq: 20              # 每幾集更新一次 reward_curve.png
   seed: 42                  # 隨機種子
-  update_every: 50          # 每幾步更新一次
+  update_every: 2048          # 每幾步更新一次 為什麼要建議對齊？
   warmup_steps: 10000       # 至少先收多少步資料再開始更新
-  grad_steps: 1             # 每次觸發時連續更新幾次
+  grad_steps: 5            # 每次觸發時連續更新幾次
 
 data:
   file: "training_data_20.parquet"
   #file: "training_data_all.parquet"
 
 safety:
-  cool_down_every: 200      # 每多少 episodes 強制休息
+  cool_down_every: 500      # 每多少 episodes 強制休息
   sleep_seconds: 120        # 休息幾秒
 
 environment:
-  initial_cash: 10000000      # 初始資金（十萬）
-  lookback: 20              # 向前看的天數
+  initial_cash: 100000      # 初始資金（十萬）
+  lookback: 30              # 向前看的天數
   reward_mode: "daily_return"   # 可選 daily_return / total_profit
   action_mode: "discrete"
   max_holdings: 5           # 最多同時持有幾檔股票
@@ -25,8 +25,8 @@ environment:
 
 logging:
   outdir: "logs/runs"       # 輸出目錄
-  save_summary: true        # 是否存 summary.csv
-  save_trades: false        # 是否存 trades_all.csv
+  save_summary: false        # 是否存 summary.csv
+  save_trades: false        # 是否存 trades_all.csv 目前沒有控制到
   trade_sample_freq: 1      # 每幾筆交易存一次
 
 dqn:
@@ -44,16 +44,16 @@ dqn:
 ppo:
   gamma: 0.99
   gae_lambda: 0.95
-  clip_epsilon: 0.1
-  actor_lr: 0.000003
-  critic_lr: 0.000001
+  clip_epsilon: 0.2
+  actor_lr: 0.0003
+  critic_lr: 0.001      #到底actor critic哪個係數大合適？
   batch_size: 64
-  n_steps: 512
+  n_steps: 2048
   epochs: 1
   entropy_coef: 0.2
   value_coef: 0.5
   device: "cpu"
-  num_envs: 2
+  num_envs: 6
   use_subproc: true
-  actor_hidden: 64         # Actor 隱藏層維度
+  actor_hidden: 128         # Actor 隱藏層維度
   critic_hidden: 64        # Critic 隱藏層維度

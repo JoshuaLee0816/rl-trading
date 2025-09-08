@@ -34,6 +34,7 @@ class Actor(nn.Module):
             if isinstance(layer, nn.Linear):
                 nn.init.xavier_uniform_(layer.weight, gain=0.01)
                 nn.init.zeros_(layer.bias)
+        print(self.net[0].weight.abs().mean().item())
 
 
     def forward(self, x):  # x: (B, obs_dim)
@@ -103,6 +104,9 @@ class PPOAgent:
         self.A = self.N * self.QMAX + self.N + 1  # 動作空間攤平成一維後的大小 (用於policy network 輸出成Logits)
         self.config = config
         self.entropy_log = []
+        self.actor_loss_log = []
+        self.critic_loss_log = []
+
 
         # === Hyperparams ===
         self.gamma         = float(config.get("gamma", 0.99))
@@ -321,6 +325,10 @@ class PPOAgent:
                 total_loss = actor_loss + critic_loss
                 total_loss.backward()
 
+                self.actor_loss_log.append(float(actor_loss.item()))
+                self.critic_loss_log.append(float(critic_loss.item()))
+
+
                 # 梯度裁切避免爆炸
                 nn.utils.clip_grad_norm_(self.actor.parameters(),  max_norm=0.5)
                 nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=0.5)
@@ -328,7 +336,17 @@ class PPOAgent:
                 self.actor_optimizer.step()
                 self.critic_optimizer.step()
 
+
+            # Debug code 
+            print("[DEBUG] adv: mean={:.4f}, std={:.4f}".format(b_advs.mean().item(), b_advs.std().item()))
+            print("[DEBUG] ratio: mean={:.4f}, std={:.4f}".format(ratio.mean().item(), ratio.std().item()))
+            print("[DEBUG] actor_loss={:.6f}, critic_loss={:.6f}".format(actor_loss.item(), critic_loss.item()))
+            print("[DEBUG] entropy={:.4f}".format(entropy.item()))
+            print("[DEBUG] logits mean:", logits.mean().item(), "std:", logits.std().item())
+
+
         # endregion 小批次更新(mini-batch SGD)
+
         
         """
         print("mask合法數:", b_mask[0].sum().item())

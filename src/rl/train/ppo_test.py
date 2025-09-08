@@ -320,6 +320,24 @@ if __name__ == "__main__":
                 fig.savefig(outdir / "reward_entropy_curve.png")
                 plt.close(fig)
 
+                # === Actor & Critic Loss ===
+                fig, ax = plt.subplots(figsize=(8, 4))
+                x = range(1, len(agent.actor_loss_log) + 1)
+
+                ax.plot(x, agent.actor_loss_log, label="Actor Loss", color="blue", linewidth=1)
+                ax.plot(x, agent.critic_loss_log, label="Critic Loss", color="red", linewidth=1)
+
+                ax.set_xlabel("Update Step")
+                ax.set_ylabel("Loss")
+                ax.set_title("Actor & Critic Loss Curve")
+                ax.legend()
+                ax.grid(alpha=0.3)
+
+                fig.tight_layout()
+                fig.savefig(outdir / "actor_critic_loss_curve.png")
+                plt.close(fig)
+                
+
     finally:
         # 確保正常關閉 vector 環境，避免 __del__ 噴錯
         try:

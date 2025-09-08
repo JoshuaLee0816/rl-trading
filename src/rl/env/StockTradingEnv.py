@@ -168,7 +168,11 @@ class StockTradingEnv(gym.Env):
         feats = self._features_window(t)
         weights = self._weights_vector(t)
         obs = np.concatenate([feats, weights]).astype(np.float32)
-        return np.clip(obs, -1e6, 1e6)
+
+        # --- 新增：標準化 ---
+        obs = (obs - obs.mean()) / (obs.std() + 1e-8)
+
+        return np.clip(obs, -1e6, 1e6)   #有normalized可能就不用clip 但是為什麼要normalized 不會有問題嗎
 
         # —— 合法化遮罩（不做門檻與懲罰） ——
     def _buy_mask(self, p_open: np.ndarray) -> np.ndarray:
