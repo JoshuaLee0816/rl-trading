@@ -264,16 +264,18 @@ class StockTradingEnv(gym.Env):
 
 
     def step(self, action):
+
+        # region 最後一天沒法走
         # 若沒有下一天就結束：仍回傳當前 obs，reward=0，並提供「終局遮罩」（只允許 HOLD）
         if self._t + 1 >= self.T:
             obs_now = self._make_obs(self._t)
             info_end = {
                 "msg": "no next day",
                 "V": int(self.portfolio_value),
-                # 統一 key 名稱為 action_mask_3d；_build_action_mask 內部已對 t+1>=T 處理 HOLD-only
-                "action_mask_3d": self._build_action_mask(self._t),
+                "action_mask_3d": self._build_action_mask(self._t), #最後一天只有HOLD是合法動作
             }
-            return obs_now, 0.0, True, False, info_end
+            return obs_now, 0.0, True, False, info_end #reward 0.0因為沒有下一天, terminated = True
+        # endregion 最後一天沒法走
 
         t = self._t
         p_open  = self.prices_open[t + 1]   # t+1 開盤成交
