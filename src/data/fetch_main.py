@@ -11,8 +11,8 @@ from fetch_finmind import (
 DATA_RAW = Path("data/raw")
 UNIVERSE_FILE = Path("data/twse_universe_2015_2024.xlsx")  # 讀 Universe 清單
 START_DATE = "2015-01-01"
-END_DATE   = "2025-06-30"
-N_SAMPLES = None #random amount
+END_DATE   = "2020-12-31"
+N_SAMPLES = 20 #random amount
 
 def _load_numeric_ids(path: Path) -> list[str]: #之後要全部讀進來 action space 要忽略掉指數不能交易的部分 
     """從 xlsx 的 'Universe'（若不存在取第一張）讀出所有「純數字」stock_id。"""
@@ -92,10 +92,27 @@ def main():
         # （可選）微小延遲；真正限流已在 _dl_* 內處理
         time.sleep(0.1)
 
+    # --- 抓大盤指數 ---
+    try:
+        print(f"[INFO] fetching TWII {START_DATE}~{END_DATE}")
+        idx = _dl_daily(dl, "^TWA00", START_DATE, END_DATE)   # 有些版本要用 "TWA00"
+        idx = _unify_ohlcv(idx)
+        if not idx.empty:
+            idx["cash_dividend"] = 0.0
+            idx["stock_dividend"] = 0.0
+            idx = idx.set_index("date").sort_index()
+            idx = idx.add_prefix("TWII_")   # 例如 TWII_open, TWII_close
+            frames.append(idx)
+            print(f"[OK] TWII appended (rows={len(idx)})")
+        else:
+            print("[WARN] TWII data empty, skip.")
+    except Exception as e:
+        print(f"[WARN] TWII fetch failed: {e}")
+
     # 4) 橫向合併 → 單一寬表輸出
     if frames:
         wide = pd.concat(frames, axis=1).sort_index()
-        out_file = DATA_RAW / "all_stocks_wide.csv"
+        out_file = DATA_RAW / "stocks_20_with_market_index_2015-2020_wide.csv"
         wide.reset_index().to_csv(out_file, index=False, encoding="utf-8-sig")
         print(f"[OK] saved wide file -> {out_file} (rows={len(wide)})")
     else:

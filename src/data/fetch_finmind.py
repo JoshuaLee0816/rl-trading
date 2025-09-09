@@ -64,7 +64,7 @@ def _dl_dividend(dl, stock_id: str, start: str, end: str):
 # 欄位對齊
 def _unify_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     rename_map = {
-        "Date": "date", "date": "date",
+        "Date": "date", "date": "date", "trading_date": "date",
         "stock_id": "stock_id",
         "Open": "open", "open": "open",
         "High": "high", "high": "high", "max": "high",
