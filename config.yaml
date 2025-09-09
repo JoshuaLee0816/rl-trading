@@ -1,6 +1,6 @@
 training:
   model: "ppo"              # 控制哪個 model 執行
-  n_episodes: 5000          # 總訓練集數
+  n_episodes: 5          # 總訓練集數
   save_freq: 5              # 每幾集更新一次 reward_curve.png
   seed: 42                  # 隨機種子
   update_every: 512          # 每幾步更新一次 為什麼要建議對齊？
