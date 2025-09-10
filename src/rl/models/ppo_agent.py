@@ -34,7 +34,7 @@ class Actor(nn.Module):
             if isinstance(layer, nn.Linear):
                 nn.init.xavier_uniform_(layer.weight, gain=0.01)
                 nn.init.zeros_(layer.bias)
-        print(self.net[0].weight.abs().mean().item())
+        #print(self.net[0].weight.abs().mean().item())
 
 
     def forward(self, x):  # x: (B, obs_dim)
@@ -338,12 +338,13 @@ class PPOAgent:
 
 
             # Debug code 
+            """
             print("[DEBUG] adv: mean={:.4f}, std={:.4f}".format(b_advs.mean().item(), b_advs.std().item()))
             print("[DEBUG] ratio: mean={:.4f}, std={:.4f}".format(ratio.mean().item(), ratio.std().item()))
             print("[DEBUG] actor_loss={:.6f}, critic_loss={:.6f}".format(actor_loss.item(), critic_loss.item()))
             print("[DEBUG] entropy={:.4f}".format(entropy.item()))
             print("[DEBUG] logits mean:", logits.mean().item(), "std:", logits.std().item())
-
+            """
 
         # endregion 小批次更新(mini-batch SGD)
 

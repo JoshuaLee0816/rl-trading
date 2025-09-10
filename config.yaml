@@ -1,11 +1,11 @@
 training:
   model: "ppo"              # 控制哪個 model 執行
-  n_episodes: 5          # 總訓練集數
+  n_episodes: 5000          # 總訓練集數
   save_freq: 1              # 每幾集更新一次 reward_curve.png
   seed: 42                  # 隨機種子
   update_every: 512          # 每幾步更新一次 為什麼要建議對齊？
   warmup_steps: 10000       # 至少先收多少步資料再開始更新
-  grad_steps: 2            # 每次觸發時連續更新幾次
+  grad_steps: 1            # 每次觸發時連續更新幾次
 
 data:
   file: "stocks_20_with_market_index_2015-2020_long.parquet"

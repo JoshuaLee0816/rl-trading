@@ -96,7 +96,7 @@ if __name__ == "__main__":
     else:
         df = pd.read_csv(data_path, parse_dates=["date"])
 
-    print(df["stock_id"].unique()[:20])
+    #print(df["stock_id"].unique()[:20])
 
     ids = sorted(df["stock_id"].unique())
     num_stocks = len(ids)
