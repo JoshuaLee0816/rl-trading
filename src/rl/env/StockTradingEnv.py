@@ -57,6 +57,13 @@ class StockTradingEnv(gym.Env):
     ):
         super().__init__()
 
+        # baseline 0050 (不能交易，只能計算報酬)
+        df_baseline = df[df["stock_id"] == "50"].copy()
+        if df_baseline.empty:
+            raise ValueError("df 缺少 baseline stock_id=50 (0050)")
+        df_baseline = df_baseline.sort_values("date")
+        self.baseline_close = df_baseline["close"].to_numpy(dtype=np.float32)
+
         # 初始化參數
         self.ids = list(stock_ids)
         self.N = len(self.ids)
@@ -345,16 +352,24 @@ class StockTradingEnv(gym.Env):
 
         # HOLD：其他情況不動
 
+
+        # Reward:
+        """
+        用0050的reward當作baseline
+        """
         # 估值 & 報酬（log-return）
-        """
-        Vprev = 上一期的total asset
-        Vnew  = 新的total asset
-        reward = 對數報酬 log(V_new/V_prev)
-        """
         V_prev = float(self.portfolio_value)
         V_new  = float(self._mark_to_market(p_close))
         self.portfolio_value = V_new
-        reward = float(np.log(max(V_new, 1e-12) / max(V_prev, 1e-12)))
+
+        # 投組報酬
+        portfolio_return = float(np.log(max(V_new, 1e-12) / max(V_prev, 1e-12)))
+        # baseline報酬
+        baseline_return = float(np.log(
+            max(self.baseline_close[t + 1], 1e-12) / max(self.baseline_close[t], 1e-12)
+        ))
+        reward = portfolio_return - baseline_return
+
 
         """
         # 考慮在HOLD的地方加入懲罰? 可行?
