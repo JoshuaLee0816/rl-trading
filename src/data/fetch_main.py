@@ -50,6 +50,12 @@ def main():
         k = min(N_SAMPLES, len(all_ids))
         sample_ids = random.sample(all_ids, k)
         print("隨機挑選股票：", sample_ids)
+
+    # === 強制加入 0050 ===
+    if "0050" not in sample_ids:
+        sample_ids.append("0050")
+        print("已強制加入 baseline：0050")
+
     print(f"抓取區間: {START_DATE} ~ {END_DATE}")
 
     DATA_RAW.mkdir(parents=True, exist_ok=True)
@@ -92,23 +98,6 @@ def main():
         # （可選）微小延遲；真正限流已在 _dl_* 內處理
         time.sleep(0.1)
 
-    # --- 抓大盤指數 ---
-    try:
-        print(f"[INFO] fetching TWII {START_DATE}~{END_DATE}")
-        idx = _dl_daily(dl, "^TWA00", START_DATE, END_DATE)   # 有些版本要用 "TWA00"
-        idx = _unify_ohlcv(idx)
-        if not idx.empty:
-            idx["cash_dividend"] = 0.0
-            idx["stock_dividend"] = 0.0
-            idx = idx.set_index("date").sort_index()
-            idx = idx.add_prefix("TWII_")   # 例如 TWII_open, TWII_close
-            frames.append(idx)
-            print(f"[OK] TWII appended (rows={len(idx)})")
-        else:
-            print("[WARN] TWII data empty, skip.")
-    except Exception as e:
-        print(f"[WARN] TWII fetch failed: {e}")
-
     # 4) 橫向合併 → 單一寬表輸出
     if frames:
         wide = pd.concat(frames, axis=1).sort_index()
@@ -117,6 +106,7 @@ def main():
         print(f"[OK] saved wide file -> {out_file} (rows={len(wide)})")
     else:
         print("[WARN] no data fetched.")
+
 
 if __name__ == "__main__":
     main()
