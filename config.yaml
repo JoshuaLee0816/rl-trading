@@ -1,7 +1,7 @@
 training:
   model: "ppo"              # 控制哪個 model 執行
-  n_episodes: 5000          # 總訓練集數
-  save_freq: 1              # 每幾集更新一次 reward_curve.png
+  n_episodes: 2000          # 總訓練集數
+  save_freq: 5              # 每幾集更新一次 reward_curve.png
   seed: 42                  # 隨機種子
   update_every: 512          # 每幾步更新一次 為什麼要建議對齊？
   warmup_steps: 10000       # 至少先收多少步資料再開始更新
@@ -46,14 +46,14 @@ ppo:
   gae_lambda: 0.95
   clip_epsilon: 0.2
   actor_lr: 0.0003
-  critic_lr: 0.001      #到底actor critic哪個係數大合適？
+  critic_lr: 0.001       #critic lr > action lr
   batch_size: 64
   n_steps: 512
   epochs: 3
-  entropy_coef: 0.1
+  entropy_coef: 0.05
   value_coef: 0.5
   device: "cpu"
-  num_envs: 2
+  num_envs: 4
   use_subproc: true
   actor_hidden: 64         # Actor 隱藏層維度
   critic_hidden: 32        # Critic 隱藏層維度
