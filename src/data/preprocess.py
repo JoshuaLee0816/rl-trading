@@ -9,7 +9,7 @@ sys.path.append(str(PROJ_ROOT))
 
 from src.features.indicators import add_moving_averages, add_rsi
 
-RAW_FILE = Path("data/raw/all_stocks_wide.csv")
+RAW_FILE = Path("data/raw/stocks_20_with_market_index_2015-2020_wide.csv")
 OUT_DIR = Path("data/processed")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -103,11 +103,11 @@ def main():
     clean_df = clean_df.round(3)
 
     # 輸出
-    clean_file = OUT_DIR / "all_stocks_clean.csv"
+    clean_file = OUT_DIR / "stocks_20_with_market_index_2015-2020_wide_clean.csv"
     clean_df.to_csv(clean_file, encoding="utf-8-sig")
     print(f"[OK] saved clean dataset -> {clean_file}")
 
-    feat_file = OUT_DIR / "all_stocks_features.csv"
+    feat_file = OUT_DIR / "stocks_20_with_market_index_2015-2020_wide_feature.csv"
     # 需保留日期索引；若想把 date 變成欄位，改用 reset_index()
     feat_df.to_csv(feat_file, encoding="utf-8-sig")
     print(f"[OK] saved feature dataset -> {feat_file}")
