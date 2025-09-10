@@ -1,16 +1,14 @@
-# src/rl/train/ppo_test.py
 import os
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 import sys
 import yaml
-import matplotlib.pyplot as plt
 import numpy as np
-from pathlib import Path
 import pandas as pd
 import datetime
 import torch
 import gymnasium as gym
+from pathlib import Path
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv
 from tqdm import trange
 
@@ -25,6 +23,11 @@ if str(SRC_DIR) not in sys.path:
 from rl.models.ppo_agent import PPOAgent
 from rl.env.StockTradingEnv import StockTradingEnv
 from rl.train.logger import RunLogger
+from rl.analyze.plot_utils import (
+    plot_reward_curve,
+    plot_entropy_curve,
+    plot_loss_curve,
+)
 
 
 def split_infos(infos):
@@ -62,17 +65,17 @@ if __name__ == "__main__":
 
     # ---- 訓練設定 ----
     n_episodes = config["training"]["n_episodes"]
-    save_freq  = config["training"]["save_freq"]
+    save_freq = config["training"]["save_freq"]
 
-    ppo_cfg    = config.get("ppo", {})
-    num_envs   = ppo_cfg.get("num_envs", 2)
-    use_subproc= ppo_cfg.get("use_subproc", True)
+    ppo_cfg = config.get("ppo", {})
+    num_envs = ppo_cfg.get("num_envs", 2)
+    use_subproc = ppo_cfg.get("use_subproc", True)
 
     # ---- 環境設定 ----
-    init_cash    = config["environment"]["initial_cash"]
-    lookback     = config["environment"]["lookback"]
-    reward_mode  = str(config["environment"]["reward_mode"]).lower().strip()
-    action_mode  = str(config["environment"]["action_mode"]).lower().strip()
+    init_cash = config["environment"]["initial_cash"]
+    lookback = config["environment"]["lookback"]
+    reward_mode = str(config["environment"]["reward_mode"]).lower().strip()
+    action_mode = str(config["environment"]["action_mode"]).lower().strip()
     max_holdings = config["environment"].get("max_holdings", None)
     qmax_per_trade = int(config["environment"].get("qmax_per_trade", 1))
 
@@ -92,7 +95,7 @@ if __name__ == "__main__":
         df = pd.read_parquet(data_path)
     else:
         df = pd.read_csv(data_path, parse_dates=["date"])
-    
+
     print(df["stock_id"].unique()[:20])
 
     ids = sorted(df["stock_id"].unique())
@@ -173,15 +176,17 @@ if __name__ == "__main__":
                         mask_flat_i = mask_flat_i.astype(bool, copy=False)
                     else:
                         mask_flat_i = None
-                    
-                    action_tuple_i, action_flat_i, logp_i, value_i = agent.select_action(obs_i, action_mask_3d=mask_i)
+
+                    action_tuple_i, action_flat_i, logp_i, value_i = agent.select_action(
+                        obs_i, action_mask_3d=mask_i
+                    )
 
                     batch_actions.append(np.asarray(action_tuple_i, dtype=np.int64))
                     batch_actions_flat.append(int(action_flat_i))
                     batch_logps.append(float(logp_i))
                     batch_values.append(float(value_i))
                     batch_masks_flat.append(mask_flat_i)
-                
+
                 actions = np.stack(batch_actions, axis=0).astype(np.int64)
                 next_obs, rewards, dones, truncs, infos = env.step(actions)
                 action_mask_batch = normalize_mask_batch(infos.get("action_mask_3d", None))
@@ -207,7 +212,7 @@ if __name__ == "__main__":
             if len(agent.entropy_log) > 0:
                 episode_entropy.append(agent.entropy_log[-1])
 
-            # === Portfolio 報酬 ===
+            # === 報酬統計 ===
             R_total = np.sum(daily_returns)
             total_return = np.exp(R_total) - 1
             days = len(daily_returns) if len(daily_returns) > 0 else 1
@@ -218,57 +223,9 @@ if __name__ == "__main__":
             summary.append({"episode": ep, "annualized_return_pct": ep_return})
 
             if ep % save_freq == 0:
-                # === Reward 曲線 ===
-                fig, ax = plt.subplots(figsize=(8, 4))
-                x = range(1, len(all_rewards) + 1)
-                ax.plot(x, all_rewards, label="Annualized Return (%)", color="#1f77b4", linewidth=2)
-                ax.axhline(0, color="gray", linestyle="--", linewidth=1, label="Baseline = 0")
-                ax.set_xlabel("Episode")
-                ax.set_ylabel("Annualized Return (%)")
-                ax.grid(True, axis="both", alpha=0.3)
-                ax.legend(loc="best")
-                fig.suptitle("Training Progress (PPO vs Baseline=0)")
-                fig.tight_layout()
-                fig.savefig(outdir / "reward_curve.png")
-                plt.close(fig)
-
-                # === Entropy 曲線 ===
-                if len(episode_entropy) > 0:
-                    fig, ax = plt.subplots(figsize=(8, 4))
-                    x2 = range(1, len(episode_entropy) + 1)
-                    ax.plot(x2, episode_entropy, label="Entropy", color="#ff7f0e", linewidth=2)
-                    ax.set_xlabel("Episode")
-                    ax.set_ylabel("Entropy")
-                    ax.grid(True, axis="both", alpha=0.3)
-                    ax.legend(loc="best")
-                    fig.suptitle("Policy Entropy")
-                    fig.tight_layout()
-                    fig.savefig(outdir / "entropy_curve.png")
-                    plt.close(fig)
-
-                # === Actor & Critic Loss ===
-                fig, ax = plt.subplots(figsize=(8, 4))
-                x = range(1, len(agent.actor_loss_log) + 1)
-
-                def moving_average(data, window=100):
-                    if len(data) < window:
-                        return data
-                    return np.convolve(data, np.ones(window)/window, mode="valid")
-
-                actor_smooth = moving_average(agent.actor_loss_log, window=100)
-                critic_smooth = moving_average(agent.critic_loss_log, window=100)
-                x_smooth = range(1, len(actor_smooth) + 1)
-
-                ax.plot(x_smooth, actor_smooth, label="Actor Loss (smoothed)", color="blue", linewidth=1)
-                ax.plot(x_smooth, critic_smooth, label="Critic Loss (smoothed)", color="red", linewidth=1)
-                ax.set_xlabel("Update Step")
-                ax.set_ylabel("Loss")
-                ax.set_title("Actor & Critic Loss Curve (Smoothed)")
-                ax.legend()
-                ax.grid(alpha=0.3)
-                fig.tight_layout()
-                fig.savefig(outdir / "actor_critic_loss_curve.png")
-                plt.close(fig)
+                plot_reward_curve(all_rewards, outdir)
+                plot_entropy_curve(episode_entropy, outdir)
+                plot_loss_curve(agent.actor_loss_log, agent.critic_loss_log, outdir)
 
     finally:
         try:
