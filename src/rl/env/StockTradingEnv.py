@@ -404,6 +404,7 @@ class StockTradingEnv(gym.Env):
             "cash": int(round(self.cash)),
             "held": int((self.shares > 0).sum()),
             "action_mask_3d": next_mask,
+            "baseline_return": baseline_return      # baseline 報酬
         }
         return obs, reward, terminated, False, info   #回傳Step結果
 
