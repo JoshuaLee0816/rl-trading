@@ -101,13 +101,15 @@ if __name__ == "__main__":
         yaml.dump(config, f)
 
     # === 載入資料 ===
-    data_file = config["data"].get("file", "training_data_20.parquet")
+    data_file = config["data"].get("file", "stocks_20_with_market_index_2015-2020_long.parquet")
     data_path = ROOT / "data" / "processed" / data_file
     if data_file.endswith(".parquet"):
         df = pd.read_parquet(data_path)
     else:
         df = pd.read_csv(data_path, parse_dates=["date"])
-
+    
+    print(df["stock_id"].unique()[:20])
+    
     ids = sorted(df["stock_id"].unique())  # 全部股票
     num_stocks = len(ids)                  # 直接以股票清單長度為檔數（提供給 PPOAgent）
 

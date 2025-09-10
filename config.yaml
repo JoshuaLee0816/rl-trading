@@ -8,7 +8,7 @@ training:
   grad_steps: 2            # 每次觸發時連續更新幾次
 
 data:
-  file: "stocks_20_with_market_index_2015-2020_long"
+  file: "stocks_20_with_market_index_2015-2020_long.parquet"
   #file: "training_data_all.parquet"
 
 safety:
@@ -53,7 +53,7 @@ ppo:
   entropy_coef: 0.1
   value_coef: 0.5
   device: "cpu"
-  num_envs: 6
+  num_envs: 2
   use_subproc: true
   actor_hidden: 64         # Actor 隱藏層維度
   critic_hidden: 32        # Critic 隱藏層維度

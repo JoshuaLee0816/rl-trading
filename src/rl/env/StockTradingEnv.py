@@ -58,9 +58,9 @@ class StockTradingEnv(gym.Env):
         super().__init__()
 
         # baseline 0050 (不能交易，只能計算報酬)
-        df_baseline = df[df["stock_id"] == "50"].copy()
+        df_baseline = df[df["stock_id"] == "0050"].copy()
         if df_baseline.empty:
-            raise ValueError("df 缺少 baseline stock_id=50 (0050)")
+            raise ValueError("df 缺少 baseline stock_id = 0050 ")
         df_baseline = df_baseline.sort_values("date")
         self.baseline_close = df_baseline["close"].to_numpy(dtype=np.float32)
 
@@ -227,6 +227,9 @@ class StockTradingEnv(gym.Env):
         # BUY 面
         can_buy_any = self._buy_mask(p_open)  # [N]
         for i in range(self.N):
+            if self.ids[i] == "50":   # baseline 0050 永遠不能買
+                continue
+
             if not can_buy_any[i] or p_open[i] <= 0:
                 continue
             max_by_cash = self._max_affordable_lots(float(p_open[i]))
@@ -237,6 +240,9 @@ class StockTradingEnv(gym.Env):
         # SELL_ALL 面（q 忽略，僅 q=0）
         sellable = self._sell_mask()
         for i in range(self.N):
+            if self.ids[i] == "50":   # baseline 0050 永遠不能賣
+                continue
+
             if sellable[i]:
                 mask[1, i, 0] = True
 

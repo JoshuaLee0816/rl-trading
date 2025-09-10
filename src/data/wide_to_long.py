@@ -69,10 +69,21 @@ def wide_to_long(df: pd.DataFrame) -> pd.DataFrame:
         .rename(columns={date_col: "date"})
     )
 
-    # 5) 收尾：再保險一次正規化、排序、扁平欄名
-    training["stock_id"] = training["stock_id"].astype(str).str.extract(r"(\d{4}(?:\.\w+)?)")[0]
+    ## 5) 收尾：再保險一次正規化、排序、扁平欄名
+    # 抓前 1~4 位數字，完全忽略後綴（.TW / .TWO）
+    training["stock_id"] = (
+        training["stock_id"]
+        .astype(str)
+        .str.extract(r"(\d{1,4})")[0]   # 只保留數字
+        .apply(lambda x: x.zfill(4))    # 補成四位數
+    )
+
+
     training.columns = [str(c) for c in training.columns]
     training = training.sort_values(["date", "stock_id"]).reset_index(drop=True)
+
+    print(training["stock_id"].unique()[:20])
+
     return training
 
 
@@ -83,10 +94,11 @@ def main():
     ap.add_argument("--output", "-o", default="training_data.csv", help="輸出長表 CSV 路徑")
     args = ap.parse_args()
 
-    df = pd.read_csv(args.input)
+    df = pd.read_csv(args.input, dtype=str)
     training_data = wide_to_long(df)
     training_data.to_csv(args.output, index=False)
     print(f"OK → {args.output}  (rows={len(training_data)}, cols={len(training_data.columns)})")
 
+    
 if __name__ == "__main__":
     main()
