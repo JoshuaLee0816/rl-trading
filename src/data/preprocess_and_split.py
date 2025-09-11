@@ -9,11 +9,9 @@ sys.path.append(str(PROJ_ROOT))
 MODE = "full"   # "full" (全股池) / "sample20" (隨機20檔)
 
 RAW_FILE = PROJ_ROOT / "data" / "raw" / "ALL_RAW_DATA_2015_2024_wide.csv"
-OUT_DIR = PROJ_ROOT / "data" / "preprocessed" / MODE
+OUT_DIR = PROJ_ROOT / "data" / "processed" / MODE
 WF_DIR = OUT_DIR / "walk_forward"
 
-CLEAN_FILE = OUT_DIR / f"ALL_clean_2015_2024_{MODE}.parquet"
-FEATURE_FILE = OUT_DIR / f"ALL_feature_2015_2024_{MODE}.parquet"
 FEATURE_LONG_FILE = OUT_DIR / f"ALL_feature_long_2015_2024_{MODE}.parquet"
 SUMMARY_FILE = WF_DIR / f"WF_summary_2015_2024_{MODE}.csv"
 
@@ -22,7 +20,7 @@ MA_WINDOWS = [5, 20, 34, 60, 120]
 RSI_WINDOW = 14
 VOLUME_MA_WINDOWS = [20, 60]
 MACD_PARAMS = (12, 26, 9)
-KD_PARAMS = (9, 3, 3)   
+KD_PARAMS = (9, 3, 3)
 ROUND_DIGITS = 3
 
 # Walk-forward 切分方式
@@ -38,46 +36,6 @@ from src.features.indicators import (
     add_macd,
     add_kd,
 )
-
-
-def _reorder_by_sid(df: pd.DataFrame,
-                    ma_windows: list[int],
-                    rsi_window: int,
-                    volume_ma_windows: list[int],
-                    macd_suffixes=["macd", "macd_signal", "macd_hist"]) -> pd.DataFrame:
-    """依股票分組，欄位順序統一"""
-    base_suffix = ["open", "high", "low", "close", "volume",
-                   "cash_dividend", "stock_dividend"]
-    sids = sorted({c.split("_")[0] for c in df.columns if "_" in c})
-
-    ordered_cols = []
-    for sid in sids:
-        # 基本欄位
-        for sfx in base_suffix:
-            col = f"{sid}_{sfx}"
-            if col in df.columns:
-                ordered_cols.append(col)
-        # MA
-        for w in ma_windows:
-            col = f"{sid}_MA{w}"
-            if col in df.columns:
-                ordered_cols.append(col)
-        # RSI
-        rcol = f"{sid}_rsi{rsi_window}"
-        if rcol in df.columns:
-            ordered_cols.append(rcol)
-        # Volume MA
-        for w in volume_ma_windows:
-            col = f"{sid}_VMA{w}"
-            if col in df.columns:
-                ordered_cols.append(col)
-        # MACD
-        for sfx in macd_suffixes:
-            col = f"{sid}_{sfx}"
-            if col in df.columns:
-                ordered_cols.append(col)
-
-    return df.reindex(columns=[c for c in ordered_cols if c in df.columns])
 
 
 def wide_to_long(df: pd.DataFrame) -> pd.DataFrame:
@@ -105,6 +63,21 @@ def wide_to_long(df: pd.DataFrame) -> pd.DataFrame:
 
     # 保證 stock_id 為四位數字
     long_df["stock_id"] = long_df["stock_id"].astype(str).str.extract(r"(\d{1,4})")[0].str.zfill(4)
+
+    # === 調整欄位順序 ===
+    base_cols = ["date", "stock_id", "open", "high", "low", "close",
+                 "volume", "cash_dividend", "stock_dividend"]
+
+    ma_cols = [f"MA{w}" for w in sorted(MA_WINDOWS)]
+    vma_cols = [f"VMA{w}" for w in sorted(VOLUME_MA_WINDOWS)]
+    rsi_cols = [f"rsi{RSI_WINDOW}"]
+    macd_cols = ["macd", "macd_signal", "macd_hist"]
+
+    ordered = base_cols + ma_cols + vma_cols + rsi_cols + macd_cols
+    other_cols = [c for c in long_df.columns if c not in ordered]
+
+    long_df = long_df[[c for c in ordered if c in long_df.columns] + other_cols]
+
     return long_df
 
 
@@ -147,57 +120,53 @@ def main():
     feat_df = add_volume_moving_averages(feat_df, windows=VOLUME_MA_WINDOWS)
     feat_df = add_macd(feat_df, *MACD_PARAMS)
     feat_df = add_kd(feat_df, *KD_PARAMS)
-    
+
     # 丟掉 warm-up
     warmup = max(MA_WINDOWS + [RSI_WINDOW])
     feat_df = feat_df.iloc[warmup:].copy()
 
-    # 欄位順序
-    feat_df = _reorder_by_sid(feat_df, MA_WINDOWS, RSI_WINDOW, VOLUME_MA_WINDOWS)
-
     # 四捨五入
-    clean_df = clean_df.round(ROUND_DIGITS)
     feat_df = feat_df.round(ROUND_DIGITS)
 
-    # === 存 parquet (寬表) ===
-    clean_df.to_parquet(CLEAN_FILE, engine="pyarrow")
-    feat_df.to_parquet(FEATURE_FILE, engine="pyarrow")
-    print(f"[OK] saved clean -> {CLEAN_FILE}")
-    print(f"[OK] saved feature (wide) -> {FEATURE_FILE}")
-
-    # === 存 parquet (長表) ===
+    # === 直接轉長表 ===
     feat_long = wide_to_long(feat_df)
+
+    # === 存 parquet (只有長表) ===
     feat_long.to_parquet(FEATURE_LONG_FILE, engine="pyarrow", index=False)
     print(f"[OK] saved feature (long) -> {FEATURE_LONG_FILE}")
 
-    # === Walk-forward splits ===
-    years = feat_df.index.year.unique()
+    # === Walk-forward splits (用長表) ===
+    years = feat_long["date"].dt.year.unique()
     start_year, end_year = years.min(), years.max()
 
     summary_rows = []
     for test_year in range(start_year + WARMUP_YEARS, end_year + 1):
         if SPLIT_MODE == "expanding":
-            train = feat_df[feat_df.index.year < test_year]
+            train = feat_long[feat_long["date"].dt.year < test_year]
         elif SPLIT_MODE == "rolling":
-            train = feat_df[(feat_df.index.year >= test_year - ROLLING_YEARS) &
-                            (feat_df.index.year < test_year)]
+            train = feat_long[(feat_long["date"].dt.year >= test_year - ROLLING_YEARS) &
+                              (feat_long["date"].dt.year < test_year)]
         else:
             raise ValueError(f"Unknown SPLIT_MODE: {SPLIT_MODE}")
 
-        test = feat_df[feat_df.index.year == test_year]
+        test = feat_long[feat_long["date"].dt.year == test_year]
         if train.empty or test.empty:
             continue
 
-        train_file = WF_DIR / f"WF_train_until_{test_year-1}_{MODE}.parquet"
+        # train 範圍：最小年 ~ 最大年
+        train_start = train["date"].dt.year.min()
+        train_end = train["date"].dt.year.max()
+
+        train_file = WF_DIR / f"WF_train_{train_start}_{train_end}_{MODE}.parquet"
         test_file = WF_DIR / f"WF_test_{test_year}_{MODE}.parquet"
 
-        train.to_parquet(train_file, engine="pyarrow")
-        test.to_parquet(test_file, engine="pyarrow")
+        train.to_parquet(train_file, engine="pyarrow", index=False)
+        test.to_parquet(test_file, engine="pyarrow", index=False)
 
         summary_rows.append({
             "split_mode": SPLIT_MODE,
             "train_file": train_file.name,
-            "train_years": f"{train.index.year.min()}-{train.index.year.max()}",
+            "train_years": f"{train_start}-{train_end}",
             "train_rows": len(train),
             "test_file": test_file.name,
             "test_year": test_year,
