@@ -211,42 +211,39 @@ class StockTradingEnv(gym.Env):
 
     def _build_action_mask(self, t: int) -> np.ndarray:
         """
-        回傳形狀 (3, N, QMAX+1) 的布林遮罩：
-          mask[0, i, q] -> BUY i, q 張 合法 (q>=1)
-          mask[1, i, 0] -> SELL_ALL i 合法（q忽略，習慣上只開 q=0）
-          mask[2, 0, 0] -> HOLD 合法
-        其它位置 False
+        回傳形狀 (3, N, QMAX+1) 的布林遮罩
+        向量化版本，避免 for loop
         """
         mask = np.zeros((3, self.N, self.QMAX + 1), dtype=bool)
+
         if t + 1 >= self.T:
-            mask[2, 0, 0] = True  # 只有 HOLD
+            mask[2, 0, 0] = True
             return mask
 
         p_open = self.prices_open[t + 1]
 
-        # BUY 面
-        can_buy_any = self._buy_mask(p_open)  # [N]
-        for i in range(self.N):
-            if self.ids[i] == "50":   # baseline 0050 永遠不能買
-                continue
+        # === BUY ===
+        can_buy_any = self._buy_mask(p_open) & (p_open > 0)
+        max_by_cash = np.floor(
+            self.cash / (self.lot_size * p_open * (1 + self.fee_buy) + 1e-9)
+        ).astype(int)
+        max_qs = np.clip(max_by_cash, 0, self.QMAX)
 
-            if not can_buy_any[i] or p_open[i] <= 0:
-                continue
-            max_by_cash = self._max_affordable_lots(float(p_open[i]))
-            max_q = max(0, min(self.QMAX, max_by_cash))
-            if max_q >= 1:
-                mask[0, i, 1:max_q + 1] = True  # q>=1 才有意義
+        # baseline 0050 永遠不能交易
+        baseline_mask = np.array([sid == "0050" for sid in self.ids])
+        can_buy_any[baseline_mask] = False
 
-        # SELL_ALL 面（q 忽略，僅 q=0）
+        for i in np.where(can_buy_any)[0]:
+            qmax = max_qs[i]
+            if qmax >= 1:
+                mask[0, i, 1:qmax + 1] = True
+
+        # === SELL_ALL ===
         sellable = self._sell_mask()
-        for i in range(self.N):
-            if self.ids[i] == "50":   # baseline 0050 永遠不能賣
-                continue
+        sellable[baseline_mask] = False
+        mask[1, sellable, 0] = True
 
-            if sellable[i]:
-                mask[1, i, 0] = True
-
-        # HOLD
+        # === HOLD ===
         mask[2, 0, 0] = True
 
         return mask
@@ -267,6 +264,7 @@ class StockTradingEnv(gym.Env):
         self.cash = float(self.initial_cash)
         self.shares = np.zeros(self.N, dtype=np.int64)
         self.portfolio_value = float(self.initial_cash)
+        self.trade_count = 0 #Sell_All的時候記錄一次（目的在觀察每個episode平均交易幾次）
 
         # 產生初始觀測
         obs = self._make_obs(self._t)
@@ -356,6 +354,8 @@ class StockTradingEnv(gym.Env):
                 self.cash       += cash_in
                 side, exec_shares, gross_cash, fees_tax = "SELL_ALL", -shares, gross, fee + tax
 
+                self.trade_count += 1 #紀錄sell次數
+
         # HOLD：其他情況不動
 
 
@@ -404,7 +404,8 @@ class StockTradingEnv(gym.Env):
             "cash": int(round(self.cash)),
             "held": int((self.shares > 0).sum()),
             "action_mask_3d": next_mask,
-            "baseline_return": baseline_return      # baseline 報酬
+            "baseline_return": baseline_return,     # baseline 報酬
+            "trade_count": self.trade_count
         }
         return obs, reward, terminated, False, info   #回傳Step結果
 

@@ -166,6 +166,7 @@ if __name__ == "__main__":
             obs, infos = env.reset()
             infos_list = split_infos(infos)
             daily_returns = []
+            ep_trade_counts = [0 for _ in range(num_envs)]  # 每個環境 episode 的交易次數
 
             action_mask_batch = normalize_mask_batch(infos.get("action_mask_3d", None))
 
@@ -210,6 +211,10 @@ if __name__ == "__main__":
                     )
                     logger.log_step(ep, infos_list[i])
 
+                    # 讀取 trade_count
+                    if "trade_count" in infos_list[i]:
+                        ep_trade_counts[i] = infos_list[i]["trade_count"]
+
                 obs = next_obs
                 daily_returns.extend(rewards.tolist())
 
@@ -226,12 +231,21 @@ if __name__ == "__main__":
 
             ep_return = annualized_return * 100
             all_rewards.append(ep_return)
-            summary.append({"episode": ep, "annualized_return_pct": ep_return})
+
+            # 多環境 → 取平均交易數
+            avg_trades = float(np.mean(ep_trade_counts))
+
+            summary.append({
+                "episode": ep,
+                "annualized_return_pct": ep_return,
+                "avg_trade_count": avg_trades,
+            })
 
             # === W&B logging ===
             wandb.log({
                 "episode": ep,
                 "annualized_return_pct": ep_return,
+                "avg_trade_count": avg_trades,
                 "baseline": 0.0,
                 "actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
                 "critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
@@ -246,14 +260,14 @@ if __name__ == "__main__":
                     "critic": agent.critic.state_dict(),
                     "episode": ep
                 }, ckpt_path)
-                print(f"💾 Saved checkpoint: {ckpt_path}")
+                print(f"Saved checkpoint: {ckpt_path}")
 
                 # 保留最近 10 個
                 ckpts = sorted(run_dir.glob("checkpoint_ep*.pt"))
                 if len(ckpts) > max_ckpts:
                     for old_ckpt in ckpts[:-max_ckpts]:
                         old_ckpt.unlink()
-                        print(f"🗑️ Removed old checkpoint: {old_ckpt}")
+                        print(f"Removed old checkpoint: {old_ckpt}")
 
     finally:
         try:
