@@ -104,6 +104,13 @@ if __name__ == "__main__":
     else:
         df = pd.read_csv(data_path, parse_dates=["date"])
 
+    # ---- 根據 config 過濾欄位 ----
+    selected_feats = config["data"].get("features", None)
+    if selected_feats is not None:
+        keep_cols = ["date", "stock_id"] + selected_feats
+        df = df[[c for c in keep_cols if c in df.columns]]
+
+    print("DataFrame 欄位：", df.columns.tolist())
     ids = sorted(df["stock_id"].unique())
     num_stocks = len(ids)
 
