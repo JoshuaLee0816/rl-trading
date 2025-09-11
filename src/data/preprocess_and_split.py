@@ -22,6 +22,7 @@ MA_WINDOWS = [5, 20, 34, 60, 120]
 RSI_WINDOW = 14
 VOLUME_MA_WINDOWS = [20, 60]
 MACD_PARAMS = (12, 26, 9)
+KD_PARAMS = (9, 3, 3)   
 ROUND_DIGITS = 3
 
 # Walk-forward 切分方式
@@ -35,6 +36,7 @@ from src.features.indicators import (
     add_rsi,
     add_volume_moving_averages,
     add_macd,
+    add_kd,
 )
 
 
@@ -144,7 +146,8 @@ def main():
     feat_df = add_rsi(feat_df, window=RSI_WINDOW)
     feat_df = add_volume_moving_averages(feat_df, windows=VOLUME_MA_WINDOWS)
     feat_df = add_macd(feat_df, *MACD_PARAMS)
-
+    feat_df = add_kd(feat_df, *KD_PARAMS)
+    
     # 丟掉 warm-up
     warmup = max(MA_WINDOWS + [RSI_WINDOW])
     feat_df = feat_df.iloc[warmup:].copy()

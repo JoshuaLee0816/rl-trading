@@ -72,3 +72,38 @@ def add_macd(df: pd.DataFrame, short=12, long=26, signal=9) -> pd.DataFrame:
         out[f"{sid}_macd_hist"] = hist
 
     return out
+
+def add_kd(df: pd.DataFrame, n: int = 9, k_period: int = 3, d_period: int = 3) -> pd.DataFrame:
+    """
+    計算 KD 指標 (Stochastic Oscillator)，輸出 K、D。
+    欄位: {sid}_K, {sid}_D
+    """
+    out = df.copy()
+    close_cols = [c for c in df.columns if c.endswith("_close")]
+
+    for col in close_cols:
+        sid = col.split("_")[0]
+        high_col = f"{sid}_high"
+        low_col = f"{sid}_low"
+
+        if high_col not in df.columns or low_col not in df.columns:
+            continue
+
+        # RSV
+        low_min = df[low_col].rolling(n).min()
+        high_max = df[high_col].rolling(n).max()
+        rsv = (df[col] - low_min) / (high_max - low_min) * 100
+
+        # K, D 初始化
+        K = pd.Series(50.0, index=df.index)
+        D = pd.Series(50.0, index=df.index)
+
+        for i in range(1, len(df)):
+            K.iloc[i] = (1/k_period) * rsv.iloc[i] + (1 - 1/k_period) * K.iloc[i-1]
+            D.iloc[i] = (1/d_period) * K.iloc[i] + (1 - 1/d_period) * D.iloc[i-1]
+
+        out[f"{sid}_K"] = K
+        out[f"{sid}_D"] = D
+
+    return out
+
