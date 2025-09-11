@@ -24,11 +24,6 @@ if str(SRC_DIR) not in sys.path:
 from rl.models.ppo_agent import PPOAgent
 from rl.env.StockTradingEnv import StockTradingEnv
 from rl.train.logger import RunLogger
-from rl.analyze.plot_utils import (
-    plot_reward_curve,
-    plot_entropy_curve,
-    plot_loss_curve,
-)
 
 
 def split_infos(infos):
@@ -68,6 +63,9 @@ if __name__ == "__main__":
     n_episodes = config["training"]["n_episodes"]
     save_freq = config["training"]["save_freq"]
 
+    ckpt_freq = 100   # 每多少 episodes 存一次 checkpoint
+    max_ckpts = 10    # 最多保留 10 個
+
     ppo_cfg = config.get("ppo", {})
     num_envs = ppo_cfg.get("num_envs", 2)
     use_subproc = ppo_cfg.get("use_subproc", True)
@@ -83,23 +81,23 @@ if __name__ == "__main__":
     # ---- 初始化 W&B ----
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     wandb.init(
-        project="rl-trading",   # 可改成你專案名稱
-        name=f"run_{run_id}",   # W&B run 名稱
-        group="full-data",      # 大資料組
-        job_type="train",       # 可以是 "train" 或 "test"
-        config=config           # 上傳 config
+        project="rl-trading",
+        name=f"run_{run_id}",
+        group="full-data",
+        job_type="train",
+        config=config
     )
 
     # ---- 輸出目錄 ----
     outdir = ROOT / config["logging"]["outdir"]
-    outdir = outdir / f"run_{run_id}"
-    outdir.mkdir(parents=True, exist_ok=True)
+    run_dir = outdir / f"run_{run_id}"
+    run_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(outdir / "config.yaml", "w") as f:
+    with open(run_dir / "config.yaml", "w") as f:
         yaml.dump(config, f)
 
     # === 載入資料 ===
-    data_file = config["data"].get("file", "stocks_20_with_market_index_2015-2020_long.parquet")
+    data_file = config["data"].get("file")
     data_path = ROOT / "data" / "processed" / data_file
     if data_file.endswith(".parquet"):
         df = pd.read_parquet(data_path)
@@ -158,7 +156,7 @@ if __name__ == "__main__":
     # === Logging ===
     all_rewards, summary = [], []
     trade_sample_freq = config["logging"].get("trade_sample_freq", 10)
-    logger = RunLogger(outdir, trade_sample_freq)
+    logger = RunLogger(run_dir, trade_sample_freq)
 
     progress_bar = trange(1, n_episodes + 1, desc="Training", unit="episode")
 
@@ -240,29 +238,38 @@ if __name__ == "__main__":
                 "entropy": episode_entropy[-1] if episode_entropy else None,
             })
 
-            """
-            有wandb應該就不用出這些圖
-            if ep % save_freq == 0:
-                plot_reward_curve(all_rewards, outdir)
-                plot_entropy_curve(episode_entropy, outdir)
-                plot_loss_curve(agent.actor_loss_log, agent.critic_loss_log, outdir)
-            """
+            # === 定期存 checkpoint ===
+            if ep % ckpt_freq == 0:
+                ckpt_path = run_dir / f"checkpoint_ep{ep}.pt"
+                torch.save({
+                    "actor": agent.actor.state_dict(),
+                    "critic": agent.critic.state_dict(),
+                    "episode": ep
+                }, ckpt_path)
+                print(f"💾 Saved checkpoint: {ckpt_path}")
+
+                # 保留最近 10 個
+                ckpts = sorted(run_dir.glob("checkpoint_ep*.pt"))
+                if len(ckpts) > max_ckpts:
+                    for old_ckpt in ckpts[:-max_ckpts]:
+                        old_ckpt.unlink()
+                        print(f"🗑️ Removed old checkpoint: {old_ckpt}")
+
     finally:
         try:
             env.close()
         except Exception:
             pass
 
-    # === 儲存模型 ===
-    torch.save(agent.actor.state_dict(), outdir / "ppo_actor.pt")
-    torch.save(agent.critic.state_dict(), outdir / "ppo_critic.pt")
+    # === 儲存最後模型 ===
+    torch.save(agent.actor.state_dict(), run_dir / "ppo_actor.pt")
+    torch.save(agent.critic.state_dict(), run_dir / "ppo_critic.pt")
 
-    # 上傳模型到 W&B
-    wandb.save(str(outdir / "ppo_actor.pt"))
-    wandb.save(str(outdir / "ppo_critic.pt"))
+    wandb.save(str(run_dir / "ppo_actor.pt"))
+    wandb.save(str(run_dir / "ppo_critic.pt"))
 
     # === 儲存紀錄 ===
     if config["logging"]["save_summary"]:
-        pd.DataFrame(summary).to_csv(outdir / "summary.csv", index=False)
+        pd.DataFrame(summary).to_csv(run_dir / "summary.csv", index=False)
 
-    print(f"✅ Training finished. Model=PPO. Results saved in: {outdir}")
+    print(f"✅ Training finished. Model=PPO. Results saved in: {run_dir}")
