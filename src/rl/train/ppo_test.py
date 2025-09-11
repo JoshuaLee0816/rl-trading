@@ -85,7 +85,8 @@ if __name__ == "__main__":
     wandb.init(
         project="rl-trading",   # 可改成你專案名稱
         name=f"run_{run_id}",   # W&B run 名稱
-        group="20random-small-data",   # 小資料組
+        group="full-data",      # 大資料組
+        job_type="train",       # 可以是 "train" 或 "test"
         config=config           # 上傳 config
     )
 
