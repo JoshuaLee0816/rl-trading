@@ -85,6 +85,7 @@ if __name__ == "__main__":
     wandb.init(
         project="rl-trading",   # 可改成你專案名稱
         name=f"run_{run_id}",   # W&B run 名稱
+        group="20random-small-data",   # 小資料組
         config=config           # 上傳 config
     )
 
@@ -232,6 +233,7 @@ if __name__ == "__main__":
             wandb.log({
                 "episode": ep,
                 "annualized_return_pct": ep_return,
+                "baseline": 0.0,
                 "actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
                 "critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
                 "entropy": episode_entropy[-1] if episode_entropy else None,

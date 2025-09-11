@@ -12,7 +12,7 @@ DATA_RAW = Path("data/raw")
 UNIVERSE_FILE = Path("data/twse_universe_2015_2024.xlsx")  # 讀 Universe 清單
 START_DATE = "2015-01-01"
 END_DATE   = "2020-12-31"
-N_SAMPLES = 20 #random amount
+N_SAMPLES = None #random amount
 
 def _load_numeric_ids(path: Path) -> list[str]: #之後要全部讀進來 action space 要忽略掉指數不能交易的部分 
     """從 xlsx 的 'Universe'（若不存在取第一張）讀出所有「純數字」stock_id。"""
