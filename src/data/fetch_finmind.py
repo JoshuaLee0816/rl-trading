@@ -20,7 +20,7 @@ DEFAULT_END = getattr(cfg, "DEFAULT_END")
 UNIVERSE = getattr(cfg, "UNIVERSE")
 
 #------RateLimiter------ same as build_twse_universe.py did
-MAX_CALLS_PER_HOUR = 580
+MAX_CALLS_PER_HOUR = 500
 WINDOW_SECONDS = 3600.0
 
 class _RateLimiter:

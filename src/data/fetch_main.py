@@ -11,7 +11,7 @@ from fetch_finmind import (
 DATA_RAW = Path("data/raw")
 UNIVERSE_FILE = Path("data/twse_universe_2015_2024.xlsx")  # 讀 Universe 清單
 START_DATE = "2015-01-01"
-END_DATE   = "2020-12-31"
+END_DATE   = "2024-12-31"
 N_SAMPLES = None #random amount
 
 def _load_numeric_ids(path: Path) -> list[str]: #之後要全部讀進來 action space 要忽略掉指數不能交易的部分 
@@ -96,12 +96,12 @@ def main():
         frames.append(out)
 
         # （可選）微小延遲；真正限流已在 _dl_* 內處理
-        time.sleep(0.1)
+        time.sleep(1)
 
     # 4) 橫向合併 → 單一寬表輸出
     if frames:
         wide = pd.concat(frames, axis=1).sort_index()
-        out_file = DATA_RAW / "stocks_20_with_market_index_2015-2020_wide.csv"
+        out_file = DATA_RAW / "ALL_RAW_DATA_2015_2024_wide.csv"
         wide.reset_index().to_csv(out_file, index=False, encoding="utf-8-sig")
         print(f"[OK] saved wide file -> {out_file} (rows={len(wide)})")
     else:
