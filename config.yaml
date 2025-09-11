@@ -8,8 +8,8 @@ training:
   grad_steps: 1            # 每次觸發時連續更新幾次
 
 data:
-  file: "stocks_20_with_market_index_2015-2020_long.parquet"
-  #file: "training_data_all.parquet"
+  #file: "stocks_20_with_market_index_2015-2020_long.parquet"
+  file: "full/walk_forward/WF_train_2015_2019_full.parquet"     #路徑注意
 
 safety:
   cool_down_every: 500      # 每多少 episodes 強制休息
