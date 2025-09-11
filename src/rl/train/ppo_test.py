@@ -8,6 +8,7 @@ import pandas as pd
 import datetime
 import torch
 import gymnasium as gym
+import wandb
 from pathlib import Path
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv
 from tqdm import trange
@@ -79,9 +80,16 @@ if __name__ == "__main__":
     max_holdings = config["environment"].get("max_holdings", None)
     qmax_per_trade = int(config["environment"].get("qmax_per_trade", 1))
 
+    # ---- 初始化 W&B ----
+    run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    wandb.init(
+        project="rl-trading",   # 可改成你專案名稱
+        name=f"run_{run_id}",   # W&B run 名稱
+        config=config           # 上傳 config
+    )
+
     # ---- 輸出目錄 ----
     outdir = ROOT / config["logging"]["outdir"]
-    run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     outdir = outdir / f"run_{run_id}"
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -95,8 +103,6 @@ if __name__ == "__main__":
         df = pd.read_parquet(data_path)
     else:
         df = pd.read_csv(data_path, parse_dates=["date"])
-
-    #print(df["stock_id"].unique()[:20])
 
     ids = sorted(df["stock_id"].unique())
     num_stocks = len(ids)
@@ -222,11 +228,22 @@ if __name__ == "__main__":
             all_rewards.append(ep_return)
             summary.append({"episode": ep, "annualized_return_pct": ep_return})
 
+            # === W&B logging ===
+            wandb.log({
+                "episode": ep,
+                "annualized_return_pct": ep_return,
+                "actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
+                "critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
+                "entropy": episode_entropy[-1] if episode_entropy else None,
+            })
+
+            """
+            有wandb應該就不用出這些圖
             if ep % save_freq == 0:
                 plot_reward_curve(all_rewards, outdir)
                 plot_entropy_curve(episode_entropy, outdir)
                 plot_loss_curve(agent.actor_loss_log, agent.critic_loss_log, outdir)
-
+            """
     finally:
         try:
             env.close()
@@ -236,6 +253,10 @@ if __name__ == "__main__":
     # === 儲存模型 ===
     torch.save(agent.actor.state_dict(), outdir / "ppo_actor.pt")
     torch.save(agent.critic.state_dict(), outdir / "ppo_critic.pt")
+
+    # 上傳模型到 W&B
+    wandb.save(str(outdir / "ppo_actor.pt"))
+    wandb.save(str(outdir / "ppo_critic.pt"))
 
     # === 儲存紀錄 ===
     if config["logging"]["save_summary"]:

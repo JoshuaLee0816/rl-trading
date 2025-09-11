@@ -1,0 +1,28 @@
+{
+  "os":  "Windows-11-10.0.26100-SP0",
+  "python":  "CPython 3.12.10",
+  "startedAt":  "2025-09-11T01:03:07.852731Z",
+  "program":  "C:\\Users\\user\\Desktop\\李哲熙\\02_財金\\RL_Trading\\src\\rl\\train\\ppo_test.py",
+  "codePath":  "src\\rl\\train\\ppo_test.py",
+  "codePathLocal":  "src\\rl\\train\\ppo_test.py",
+  "git":  {
+    "remote":  "https://github.com/JoshuaLee0816/rl-trading.git",
+    "commit":  "ad411d77908f7066eecb3425c9cb7870d6b4aa71"
+  },
+  "email":  "310274movie@gmail.com",
+  "root":  "C:\\Users\\user\\Desktop\\李哲熙\\02_財金\\RL_Trading",
+  "host":  "LAPTOP-N1U6QE0M",
+  "executable":  "C:\\Users\\user\\Desktop\\李哲熙\\02_財金\\RL_Trading\\.venv\\scripts\\python.exe",
+  "cpu_count":  10,
+  "cpu_count_logical":  12,
+  "disk":  {
+    "/":  {
+      "total":  "509845245952",
+      "used":  "434810064896"
+    }
+  },
+  "memory":  {
+    "total":  "16856166400"
+  },
+  "writerId":  "bzccebdk98r5i0j1123ms0cv4is72xts"
+}
