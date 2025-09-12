@@ -248,7 +248,7 @@ if __name__ == "__main__":
                 "avg_trade_count": avg_trades,
             })
 
-            # === W&B logging ===
+            # === W&B logging === adjust to update log in wandb for every 10 or 20 episodes 會不會跳過資料？ 需確認
             wandb.log({
                 "episode": ep,
                 "annualized_return_pct": ep_return,
