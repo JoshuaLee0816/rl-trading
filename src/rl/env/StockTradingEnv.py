@@ -21,6 +21,8 @@ class StockTradingEnv(gym.Env):
 
     ▶ Reward
       r_t = log( V_{t+1} / V_t )，以 t+1 收盤估值，已含交易成本/稅
+      Set 0050 as baseline
+      Penalty for high frequents trades -> cause log in r_t , so penalty would be set between 0.01 and 0.0001
 
     ▶ 限制
       - 只能整張交易（lot_size=1000）
@@ -359,26 +361,36 @@ class StockTradingEnv(gym.Env):
         # HOLD：其他情況不動
 
 
-        # Reward:
+        # region Reward:
         """
         用0050的reward當作baseline
         """
         # 估值 & 報酬（log-return）
-        V_prev = float(self.portfolio_value)
-        V_new  = float(self._mark_to_market(p_close))
+        V_prev = float(self.portfolio_value)            # previous trading date (total asset)
+        V_new  = float(self._mark_to_market(p_close))   # current trading date
         self.portfolio_value = V_new
 
         # 投組報酬
         portfolio_return = float(np.log(max(V_new, 1e-12) / max(V_prev, 1e-12)))
-        # baseline報酬
+        # baseline報酬 
         baseline_return = float(np.log(
             max(self.baseline_close[t + 1], 1e-12) / max(self.baseline_close[t], 1e-12)
         ))
         reward = portfolio_return - baseline_return
+        
+        # Penalty part => 1. per trade (sell_ALL -> -= 0.0001)
+        """
+        My question is how to compare with the baseline cause the reward first you constructed is baselint_return
+        log reward, so -= 0.00005 shall be enough to restrict high freq trades, I believe
+        """
+        if info["side"] == "BUY":
+            reward -= 0.00005
 
+        # endRegion Reward
+        
 
         """
-        # 考慮在HOLD的地方加入懲罰? 可行?
+        # 考慮在HOLD的地方加入懲罰? HOLD過久penalty其實不合理
         if side == "HOLD":
             reward -= 0.0001
         """

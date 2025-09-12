@@ -248,16 +248,18 @@ if __name__ == "__main__":
                 "avg_trade_count": avg_trades,
             })
 
-            # === W&B logging === adjust to update log in wandb for every 10 or 20 episodes 會不會跳過資料？ 需確認
-            wandb.log({
-                "episode": ep,
-                "annualized_return_pct": ep_return,
-                "avg_trade_count": avg_trades,
-                "baseline": 0.0,
-                "actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
-                "critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
-                "entropy": episode_entropy[-1] if episode_entropy else None,
-            })
+            # === W&B logging === adjust to update log in wandb for every 10 or 20 episodes 會跳過資料 但重點是趨勢
+            
+            if ep % 10 == 0:
+                wandb.log({
+                    "episode": ep,
+                    "annualized_return_pct": ep_return,
+                    "avg_trade_count": avg_trades,
+                    "baseline": 0.0,
+                    "actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
+                    "critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
+                    "entropy": episode_entropy[-1] if episode_entropy else None,
+                })
 
             # === 定期存 checkpoint ===
             if ep % ckpt_freq == 0:
