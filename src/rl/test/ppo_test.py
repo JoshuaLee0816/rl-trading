@@ -120,5 +120,5 @@ plt.show()
 
 # === 輸出交易紀錄 ===
 df_trades = pd.DataFrame(actions, columns=["date", "side", "stock_id", "lots", "cash", "value"])
-df_trades.to_csv("trades_2020.csv", index=False)
+df_trades.to_csv("src/rl/test/testing_output/trades_2020.csv", index=False)
 print("交易紀錄已存 trades_2020.csv")
