@@ -383,7 +383,7 @@ class StockTradingEnv(gym.Env):
         My question is how to compare with the baseline cause the reward first you constructed is baselint_return
         log reward, so -= 0.00005 shall be enough to restrict high freq trades, I believe
         """
-        if info["side"] == "BUY":
+        if side == "BUY":
             reward -= 0.00005
 
         # endRegion Reward
