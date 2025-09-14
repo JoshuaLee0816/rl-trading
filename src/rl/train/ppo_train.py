@@ -9,6 +9,7 @@ import datetime
 import torch
 import gymnasium as gym
 import wandb
+import time
 from pathlib import Path
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv
 from tqdm import trange
@@ -177,7 +178,11 @@ if __name__ == "__main__":
 
             action_mask_batch = normalize_mask_batch(infos.get("action_mask_3d", None))
 
+            t_env_total, t_train_total, update_count = 0.0, 0.0, 0
+
             for t in range(agent.n_steps):
+                # === Env step timing ===
+                t0 = time.time()
                 batch_actions, batch_actions_flat, batch_logps, batch_values, batch_masks_flat = [], [], [], [], []
                 for i in range(int(getattr(obs, "shape", [env.num_envs])[0])):
                     obs_i = obs[i]
@@ -203,6 +208,10 @@ if __name__ == "__main__":
 
                 actions = np.stack(batch_actions, axis=0).astype(np.int64)
                 next_obs, rewards, dones, truncs, infos = env.step(actions)
+                t1 = time.time()
+                env_time = t1 - t0
+                t_env_total += env_time
+
                 action_mask_batch = normalize_mask_batch(infos.get("action_mask_3d", None))
                 infos_list = split_infos(infos)
 
@@ -225,7 +234,16 @@ if __name__ == "__main__":
                 obs = next_obs
                 daily_returns.extend(rewards.tolist())
 
+            # === PPO update timing ===
+            t2 = time.time()
             agent.update()
+            t3 = time.time()
+            train_time = t3 - t2
+            t_train_total += train_time
+            update_count += 1
+
+            ratio = (t_env_total / t_train_total) if t_train_total > 0 else float("inf")
+            print(f"[Timing] Env step: {t_env_total:.6f}s | Train update: {t_train_total:.6f}s | Ratio (Env:Train) = {ratio:.2f}:1")
 
             if len(agent.entropy_log) > 0:
                 episode_entropy.append(agent.entropy_log[-1])
@@ -248,8 +266,7 @@ if __name__ == "__main__":
                 "avg_trade_count": avg_trades,
             })
 
-            # === W&B logging === adjust to update log in wandb for every 10 or 20 episodes 會跳過資料 但重點是趨勢
-            
+            # === W&B logging ===
             if ep % 5 == 0:
                 wandb.log({
                     "episode": ep,
