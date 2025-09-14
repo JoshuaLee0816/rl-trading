@@ -250,7 +250,7 @@ if __name__ == "__main__":
 
             # === W&B logging === adjust to update log in wandb for every 10 or 20 episodes 會跳過資料 但重點是趨勢
             
-            if ep % 10 == 0:
+            if ep % 5 == 0:
                 wandb.log({
                     "episode": ep,
                     "annualized_return_pct": ep_return,

@@ -3,14 +3,14 @@ training:
   n_episodes: 10000          # 總訓練集數
   save_freq: 5              # 每幾集更新一次 reward_curve.png
   seed: 42                  # 隨機種子
-  update_every: 256          # 每幾步更新一次 為什麼要建議對齊？
+  update_every: 256          # 每幾步更新一次 
   warmup_steps: 10000       # 至少先收多少步資料再開始更新
   grad_steps: 1            # 每次觸發時連續更新幾次
 
 data:
   #file: "stocks_20_with_market_index_2015-2020_long.parquet"
   file: "full/walk_forward/WF_train_2015_2019_full.parquet"     #路徑注意
-  features: ['open', 'high', 'low', 'close', 'volume', 'cash_dividend', 'stock_dividend', 'MA5', 'MA34', 'MA60', 'VMA20', 'VMA60', 'rsi14']  # 要保留的特徵
+  features: ['open', 'high', 'low', 'close', 'volume', 'MA5', 'MA34', 'MA60', 'VMA20', 'VMA60', 'rsi14']  # 要保留的特徵
   #features: ['open', 'high', 'low', 'close', 'volume', 'cash_dividend', 'stock_dividend', 'MA5', 'MA20', 'MA34', 'MA60', 'MA120', 'VMA20', 'VMA60', 'rsi14', 'macd', 'macd_signal', 'macd_hist']  # 要保留的特徵
 
 safety:
@@ -47,8 +47,8 @@ ppo:
   gamma: 0.995
   gae_lambda: 0.95
   clip_epsilon: 0.2
-  actor_lr: 0.0001
-  critic_lr: 0.0003        #critic lr > action lr
+  actor_lr: 0.0002
+  critic_lr: 0.0004        #critic lr > action lr
   batch_size: 64
   n_steps: 512
   epochs: 1                #?????
