@@ -276,7 +276,8 @@ if __name__ == "__main__":
                     "actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
                     "critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
                     "entropy": episode_entropy[-1] if episode_entropy else None,
-                })
+                }, step = ep)
+                # Step = ep controls the x-axis with accurate numbers of episodes
 
             # === 定期存 checkpoint ===
             if ep % ckpt_freq == 0:
