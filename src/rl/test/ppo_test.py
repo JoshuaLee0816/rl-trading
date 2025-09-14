@@ -17,8 +17,8 @@ from rl.env.StockTradingEnv import StockTradingEnv
 from rl.models.ppo_agent import PPOAgent
 
 # === 路徑設定 ===
-ACTOR_PATH = "logs/runs/run_20250912_153943/checkpoint_ep200.pt"         # 訓練好的 PPO checkpoint
-DATA_PATH = "data/processed/full/walk_forward/WF_test_2021_full.parquet"  # 測試資料
+ACTOR_PATH = "logs/runs/run_20250914_171116/checkpoint_ep8200.pt"         # 訓練好的 PPO checkpoint
+DATA_PATH = "data/processed/full/walk_forward/WF_test_2020_full.parquet"  # 測試資料
 CONFIG_PATH = ROOT / "config.yaml"
 
 # === 載入 config.yaml ===

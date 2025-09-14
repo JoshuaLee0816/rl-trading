@@ -384,7 +384,7 @@ class StockTradingEnv(gym.Env):
         log reward, so -= 0.00005 shall be enough to restrict high freq trades, I believe
         """
         if side == "BUY":
-            reward -= 0.00005
+            reward -= 0.0001
 
         # endRegion Reward
         

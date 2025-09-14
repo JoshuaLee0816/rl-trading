@@ -266,8 +266,8 @@ if __name__ == "__main__":
                 "avg_trade_count": avg_trades,
             })
 
-            # === W&B logging ===
-            if ep % 5 == 0:
+            # === W&B logging === #if not sync, wandb sync wandb/latest-run
+            if ep % 1 == 0:
                 wandb.log({
                     "episode": ep,
                     "annualized_return_pct": ep_return,

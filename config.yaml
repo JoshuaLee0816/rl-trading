@@ -47,12 +47,12 @@ ppo:
   gamma: 0.995
   gae_lambda: 0.95
   clip_epsilon: 0.2
-  actor_lr: 0.0002
-  critic_lr: 0.0004        #critic lr > action lr
+  actor_lr: 0.0001
+  critic_lr: 0.0003        #critic lr > action lr
   batch_size: 64
   n_steps: 512
   epochs: 1                #?????
-  entropy_coef: 0.05
+  entropy_coef: 0.1
   value_coef: 0.5
   device: "cpu"
   num_envs: 1
