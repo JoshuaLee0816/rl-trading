@@ -285,7 +285,7 @@ class StockTradingEnv(gym.Env):
                 side, exec_shares, gross_cash, fees_tax = "SELL_ALL", -shares, gross, fee + tax
                 self.trade_count += 1
 
-        # Reward
+        # Reward (思考是否需要reward scaling, 避免advantages過於快速接近0)
         V_prev = float(self.portfolio_value)
         V_new  = float(self._mark_to_market(p_close))
         self.portfolio_value = V_new
