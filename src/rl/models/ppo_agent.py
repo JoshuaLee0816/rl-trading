@@ -296,8 +296,6 @@ class PPOAgent:
             wandb.log({
                 "adv_mean_raw": adv_mean_raw,
                 "adv_std_raw": adv_std_raw,
-                "adv_mean_norm": adv_mean_norm,
-                "adv_std_norm": adv_std_norm,
             })
 
         N = obs.size(0)
