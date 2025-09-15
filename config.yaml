@@ -23,7 +23,7 @@ environment:
   lookback: 15              # 向前看的天數
   reward_mode: "daily_return"   # 可選 daily_return / total_profit
   action_mode: "discrete"
-  max_holdings: 5           # 最多同時持有幾檔股票
+  max_holdings: 3           # 最多同時持有幾檔股票
   qmax_per_trade: 10        # 單檔股票單次最大交易張數
 
 logging:
