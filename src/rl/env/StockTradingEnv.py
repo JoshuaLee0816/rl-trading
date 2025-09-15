@@ -293,7 +293,7 @@ class StockTradingEnv(gym.Env):
         baseline_return  = float(np.log(max(self.baseline_close[t + 1], 1e-12) /
                                         max(self.baseline_close[t], 1e-12)))
         reward = portfolio_return - baseline_return
-        if side == ("BUY", "SELL_ALL"):
+        if side in ("BUY", "SELL_ALL"):
             reward -= 0.00005
 
         # === 個股懲罰 (slot-based) ===
@@ -306,7 +306,7 @@ class StockTradingEnv(gym.Env):
                     # 線性懲罰
                     # penalty += abs(floating_ret) * 0.05   # α=0.05，可調
                     # 指數型懲罰
-                    penalty += (np.exp(-5 * floating_ret) - 1)*0.1
+                    penalty += (np.exp(-5 * floating_ret) - 1)*0.001
         reward -= penalty
 
         self._t += 1
