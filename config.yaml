@@ -6,6 +6,7 @@ training:
   update_every: 256          # 每幾步更新一次 
   warmup_steps: 10000       # 至少先收多少步資料再開始更新
   grad_steps: 1            # 每次觸發時連續更新幾次
+  upload_wandb: false        # 要不要upload to wandb
 
 data:
   #file: "stocks_20_with_market_index_2015-2020_long.parquet"

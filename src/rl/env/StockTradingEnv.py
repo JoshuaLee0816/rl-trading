@@ -3,46 +3,57 @@ import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
 
-
 class StockTradingEnv(gym.Env):
     """
     StockTradingEnv (Broker-style, 1 trade per day)
 
     ▶ Observation (obs)
       shape = (N*F*K) + (1 + N) + (2 * max_holdings)
-      = [K天 * N檔 * F特徵攤平] + [現金佔比] + [各股市值佔比] + [持倉槽位資訊]
+      = [K天 * N檔 * F特徵攤平] + [現金佔比] + [各股市值佔比(用t日收盤估值)] + [持倉槽位資訊]
       調用時序：在 t 觀測 → t 決策 → t+1 開盤成交 → t+1 收盤估值
 
     ▶ Action (MultiDiscrete([3, N, QMAX+1]))
       op  ∈ {0,1,2} = {BUY, SELL_ALL, HOLD}
       idx ∈ {0..N-1}   股票索引
       q   ∈ {0..QMAX}  買入張數（單位=張，=1000股；僅 BUY 時有效，q>=1 才有意義）
+      * 每天只會執行一筆（買或全賣或不動） 
+      * 不合法動作不懲罰，直接視為 HOLD（建議在 policy 端用 action_mask 做 masked softmax）
 
     ▶ Reward
-      r_t = log( V_{t+1} / V_t ) - baseline_return
-      已含交易成本/稅，並可附加 trade penalty
+      r_t = log( V_{t+1} / V_t )，以 t+1 收盤估值，已含交易成本/稅
+      Set 0050 as baseline
+      Penalty for high frequents trades -> cause log in r_t , so penalty would be set between 0.01 and 0.0001
 
     ▶ 限制
       - 只能整張交易（lot_size=1000）
-      - 最多同時持有 max_holdings 檔
-      - baseline: 0050 不能交易
+      - 最多同時持有 max_holdings 檔（新開倉受限；既有持倉可加碼）
+      - 交易成本：fee_buy / fee_sell；賣出另計 tax_sell
+
+    ▶ reset() 回傳: (obs, info)
+       info["action_mask"] 形狀 (3, N, QMAX+1)
+
+    ▶ step(action) 回傳: (obs, reward, terminated, truncated, info)
+       - terminated：到資料尾端
+       - truncated：False（如需爆倉線可自行擴充）
+       - info：紀錄當日動作、費稅、現金、持股數、下一步 action_mask
     """
 
     metadata = {"render_modes": ["human"]}
 
+    # region 初始化部分
     def __init__(
         self,
-        df: pd.DataFrame,
-        stock_ids,
-        lookback: int,
+        df: pd.DataFrame,          # 長表: [date, stock_id, open, close, ...features]
+        stock_ids,                 # 股票池順序（list-like）
+        lookback: int,             # K 天視窗
         initial_cash: int,
-        max_holdings: int,
-        qmax_per_trade: int = 10,
+        max_holdings: int,         # 同時持有檔數上限（新開倉受限；既有可加碼）
+        qmax_per_trade: int = 10,  # 單日單筆最多可買的張數上限（固定維度用；實際受現金限制）
         seed: int = 42,
         fee_buy: float = 0.001425 * 0.6,
         fee_sell: float = 0.001425 * 0.6,
         tax_sell: float = 0.003,
-        lot_size: int = 1000,
+        lot_size: int = 1000,       #一張 = 1000股
         reward_mode: str = "daily_return",
         action_mode: str = "discrete"
     ):
@@ -67,7 +78,7 @@ class StockTradingEnv(gym.Env):
         self.rng = np.random.default_rng(seed)
         self.reward_mode = reward_mode
 
-        # 數據檢查
+        # region 數據檢查
         df = df.copy().sort_values(["date", "stock_id"]).reset_index(drop=True)
         if not {"date", "stock_id", "open", "close"}.issubset(df.columns):
             raise ValueError("df 必須至少包含: ['date','stock_id','open','close']")
@@ -83,36 +94,77 @@ class StockTradingEnv(gym.Env):
         self.T = len(self.dates)
         if self.T <= self.K + 1:
             raise ValueError("資料天數不足（需要 > lookback+1 天）")
+        # endregion 數據檢查
 
-        # 特徵矩陣
+        # In order to catch the features except date and stock_id 
         self._feat_cols = [c for c in df.columns if c not in ["date", "stock_id"]]
-        open_pv = df.pivot(index="date", columns="stock_id", values="open").reindex(index=self.dates, columns=self.ids)
-        close_pv = df.pivot(index="date", columns="stock_id", values="close").reindex(index=self.dates, columns=self.ids)
-        self.prices_open = open_pv.to_numpy(dtype=np.float64)
-        self.prices_close = close_pv.to_numpy(dtype=np.float64)
 
-        feat_mats = []
+        # convert df's "open" and "close" into 2-dimensions matrix
+        open_pv  = df.pivot(index="date", columns="stock_id", values="open").reindex(index=self.dates, columns=self.ids)
+        close_pv = df.pivot(index="date", columns="stock_id", values="close").reindex(index=self.dates, columns=self.ids)
+        self.prices_open  = open_pv.to_numpy(dtype=np.float64)   # [T, N]
+        self.prices_close = close_pv.to_numpy(dtype=np.float64)  # [T, N]
+
+        # 全特徵 3D -> numpy 
+        feat_mats = []     #專門存放每個特徵轉換後的矩陣
         for c in self._feat_cols:
             pv = df.pivot(index="date", columns="stock_id", values=c).reindex(index=self.dates, columns=self.ids)
-            feat_mats.append(pv.to_numpy(dtype=np.float32)[..., None])
+            feat_mats.append(pv.to_numpy(dtype=np.float32)[..., None])   # [T, N, 1]
         self.features = np.concatenate(feat_mats, axis=2) if feat_mats else np.zeros((self.T, self.N, 0))
 
-        # 狀態變數
+        # 狀態 (用來描述當前狀態的變數)
         self._t = None
         self.cash = None
         self.shares = None
         self.portfolio_value = None
         self.avg_costs = None
-        self.slots = None  # slot-based 持倉紀錄 (就是把slots = 1 2 3 4 5 當作現在池倉的編號)
+        self.slots = None  # slot-based 持倉紀錄
 
-        # obs_dim
+        # 定義環境的觀測空間
         obs_dim = self.N * self.features.shape[2] * self.K + (1 + self.N) + 2 * self.max_holdings
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32)
 
-        # 動作空間
+        # 定義動作空間
         self.action_space = spaces.MultiDiscrete([3, self.N, self.QMAX + 1])
 
-    # region 工具
+    # endregion 初始化部分
+
+    # region 小工具部分
+    def _build_action_mask(self, t: int) -> np.ndarray:
+        """
+        回傳形狀 (3, N, QMAX+1) 的布林遮罩
+        """
+        mask = np.zeros((3, self.N, self.QMAX + 1), dtype=bool)
+        if t + 1 >= self.T:
+            mask[2, 0, 0] = True
+            return mask
+
+        p_open = self.prices_open[t + 1]
+        baseline_mask = np.array([sid == "0050" for sid in self.ids])
+
+        # BUY
+        for i in range(self.N):
+            if baseline_mask[i]:
+                continue
+            price = p_open[i]
+            if price <= 0:
+                continue
+            max_lots = int(self.cash // (self.lot_size * price * (1 + self.fee_buy)))
+            max_q = min(max_lots, self.QMAX)
+            if max_q >= 1:
+                mask[0, i, 1:max_q + 1] = True
+
+        # SELL_ALL
+        for i in range(self.N):
+            if baseline_mask[i]:
+                continue
+            if self.shares[i] > 0:
+                mask[1, i, 0] = True
+
+        # HOLD
+        mask[2, 0, 0] = True
+        return mask
+
     def _mark_to_market(self, prices: np.ndarray) -> float:
         return float((self.shares * prices).sum() + self.cash)
 
@@ -127,7 +179,7 @@ class StockTradingEnv(gym.Env):
         return np.concatenate([[self.cash / V], (self.shares * prices) / V])
 
     def _features_window(self, t: int) -> np.ndarray:
-        win = self.features[t - self.K + 1 : t + 1]
+        win = self.features[t - self.K + 1 : t + 1]   # [K, N, F]
         return win.reshape(-1)
 
     def _slot_info(self, t: int) -> np.ndarray:
@@ -151,10 +203,9 @@ class StockTradingEnv(gym.Env):
         obs = np.concatenate([feats, weights, slot_info]).astype(np.float32)
         obs = (obs - obs.mean()) / (obs.std() + 1e-8)
         return np.clip(obs, -1e6, 1e6)
+    # endregion 小工具部分
 
-    # endregion 工具
-
-    # region Gym API
+    # region GymAPI
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         self._t = self.K
@@ -179,8 +230,8 @@ class StockTradingEnv(gym.Env):
             return obs_now, 0.0, True, False, info_end
 
         t = self._t
-        p_open = self.prices_open[t + 1]
-        p_close = self.prices_close[t + 1]
+        p_open  = self.prices_open[t + 1]   # t+1 開盤成交
+        p_close = self.prices_close[t + 1]  # t+1 收盤估值
         op, idx, q = int(action[0]), int(action[1]), int(action[2])
         side, exec_shares, gross_cash, fees_tax = "HOLD", 0, 0, 0
         mask = self._build_action_mask(t)
@@ -188,26 +239,32 @@ class StockTradingEnv(gym.Env):
         # BUY
         if op == 0 and 0 <= idx < self.N and 1 <= q <= self.QMAX and mask[0, idx, q]:
             price = float(p_open[idx])
-            lots = min(int(q), self._max_affordable_lots(price))
-            if lots >= 1 and price > 0:
-                shares = lots * self.lot_size
-                gross = int(round(shares * price))
-                fee = int(round(gross * self.fee_buy))
-                cash_out = gross + fee
-                if cash_out <= self.cash + 1e-6:
-                    old_shares = self.shares[idx]
-                    self.shares[idx] += shares
-                    self.cash -= cash_out
-                    old_cost = self.avg_costs[idx]
-                    if old_shares > 0:
-                        self.avg_costs[idx] = (old_cost * old_shares + price * shares) / (old_shares + shares)
-                    else:
-                        self.avg_costs[idx] = price
-                        for s in range(self.max_holdings):
-                            if self.slots[s] is None:
-                                self.slots[s] = idx
-                                break
-                    side, exec_shares, gross_cash, fees_tax = "BUY", shares, -gross, fee
+
+            # === 限制條件：低於 10 塊的股票不能買 ===
+            if price < 10:
+                side = "HOLD"   # 視為不動作
+            
+            else:
+                lots  = min(int(q), int(self.cash // (self.lot_size * price * (1 + self.fee_buy))))
+                if lots >= 1 and price > 0:
+                    shares = lots * self.lot_size
+                    gross  = int(round(shares * price))
+                    fee    = int(round(gross * self.fee_buy))
+                    cash_out = gross + fee
+                    if cash_out <= self.cash + 1e-6:
+                        old_shares = self.shares[idx]
+                        self.shares[idx] += shares
+                        self.cash -= cash_out
+                        old_cost = self.avg_costs[idx]
+                        if old_shares > 0:
+                            self.avg_costs[idx] = (old_cost * old_shares + price * shares) / (old_shares + shares)
+                        else:
+                            self.avg_costs[idx] = price
+                            for s in range(self.max_holdings):
+                                if self.slots[s] is None:
+                                    self.slots[s] = idx
+                                    break
+                        side, exec_shares, gross_cash, fees_tax = "BUY", shares, -gross, fee
 
         # SELL_ALL
         elif op == 1 and 0 <= idx < self.N and mask[1, idx, 0]:
@@ -215,8 +272,8 @@ class StockTradingEnv(gym.Env):
             if shares > 0 and p_open[idx] > 0:
                 price = float(p_open[idx])
                 gross = int(round(shares * price))
-                fee = int(round(gross * self.fee_sell))
-                tax = int(round(gross * self.tax_sell))
+                fee   = int(round(gross * self.fee_sell))
+                tax   = int(round(gross * self.tax_sell))
                 cash_in = gross - fee - tax
                 self.shares[idx] = 0
                 self.cash += cash_in
@@ -230,11 +287,11 @@ class StockTradingEnv(gym.Env):
 
         # Reward
         V_prev = float(self.portfolio_value)
-        V_new = float(self._mark_to_market(p_close))
+        V_new  = float(self._mark_to_market(p_close))
         self.portfolio_value = V_new
         portfolio_return = float(np.log(max(V_new, 1e-12) / max(V_prev, 1e-12)))
-        baseline_return = float(np.log(max(self.baseline_close[t + 1], 1e-12) /
-                                       max(self.baseline_close[t], 1e-12)))
+        baseline_return  = float(np.log(max(self.baseline_close[t + 1], 1e-12) /
+                                        max(self.baseline_close[t], 1e-12)))
         reward = portfolio_return - baseline_return
         if side == "BUY":
             reward -= 0.0001
@@ -243,6 +300,21 @@ class StockTradingEnv(gym.Env):
         terminated = (self._t + 1 >= self.T)
         obs = self._make_obs(self._t)
         next_mask = self._build_action_mask(self._t)
+
+        # === 新增 holdings_detail ===
+        holdings_detail = {
+            s: {
+                "stock_id": self.ids[i] if i is not None else None,
+                "shares": int(self.shares[i]) if i is not None else 0,
+                "avg_cost": float(self.avg_costs[i]) if i is not None else 0.0,
+                "cur_price": float(self.prices_close[self._t, i]) if i is not None else 0.0,
+                "floating_ret": (
+                    (self.prices_close[self._t, i] - self.avg_costs[i]) / self.avg_costs[i]
+                    if (i is not None and self.avg_costs[i] > 0) else 0.0
+                )
+            }
+            for s, i in enumerate(self.slots)
+        }
 
         info = {
             "V": int(self.portfolio_value),
@@ -258,13 +330,8 @@ class StockTradingEnv(gym.Env):
             "action_mask_3d": next_mask,
             "baseline_return": baseline_return,
             "trade_count": self.trade_count,
-            # Debug 用：slot 對應表
-            "slots_mapping": {
-                s: (self.ids[i] if i is not None else None) 
-                for s, i in enumerate(self.slots)
-            }
+            "slots_mapping": {s: (self.ids[i] if i is not None else None) for s, i in enumerate(self.slots)},
+            "holdings_detail": holdings_detail,   # <── 新增
         }
 
         return obs, reward, terminated, False, info
-
-    # endregion Gym API

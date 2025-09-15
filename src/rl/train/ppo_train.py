@@ -63,6 +63,7 @@ if __name__ == "__main__":
     # ---- 訓練設定 ----
     n_episodes = config["training"]["n_episodes"]
     save_freq = config["training"]["save_freq"]
+    upload_wandb = config["training"]["upload_wandb"]
 
     ckpt_freq = 100   # 每多少 episodes 存一次 checkpoint
     max_ckpts = 10    # 最多保留 10 個
@@ -81,13 +82,15 @@ if __name__ == "__main__":
 
     # ---- 初始化 W&B ----
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    wandb.init(
-        project="rl-trading",
-        name=f"run_{run_id}",
-        group="full-data",
-        job_type="train",
-        config=config
-    )
+    
+    if upload_wandb:
+        wandb.init(
+            project="rl-trading",
+            name=f"run_{run_id}",
+            group="full-data",
+            job_type="train",
+            config=config
+        )
 
     # ---- 輸出目錄 ----
     outdir = ROOT / config["logging"]["outdir"]
@@ -208,6 +211,7 @@ if __name__ == "__main__":
 
                 actions = np.stack(batch_actions, axis=0).astype(np.int64)
                 next_obs, rewards, dones, truncs, infos = env.step(actions)
+                
                 t1 = time.time()
                 env_time = t1 - t0
                 t_env_total += env_time
@@ -227,6 +231,14 @@ if __name__ == "__main__":
                     )
                     logger.log_step(ep, infos_list[i])
 
+                    """
+                    # === Debug: 印出 slot 狀態 ===
+                    if "holdings_detail" in infos_list[i]:
+                        print(f"[DEBUG][ep={ep} t={t}] env={i} holdings:")
+                        for slot, detail in infos_list[i]["holdings_detail"].items():
+                            print(f"   Slot {slot}: {detail}")
+                    """
+                    
                     # 讀取 trade_count
                     if "trade_count" in infos_list[i]:
                         ep_trade_counts[i] = infos_list[i]["trade_count"]
@@ -266,8 +278,8 @@ if __name__ == "__main__":
                 "avg_trade_count": avg_trades,
             })
 
-            # === W&B logging === #if not sync, wandb sync wandb/latest-run
-            if ep % 1 == 0:
+            # === W&B logging ===
+            if upload_wandb and ep % 1 == 0:
                 wandb.log({
                     "episode": ep,
                     "annualized_return_pct": ep_return,
@@ -277,7 +289,6 @@ if __name__ == "__main__":
                     "critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
                     "entropy": episode_entropy[-1] if episode_entropy else None,
                 }, step = ep)
-                # Step = ep controls the x-axis with accurate numbers of episodes
 
             # === 定期存 checkpoint ===
             if ep % ckpt_freq == 0:
@@ -306,8 +317,9 @@ if __name__ == "__main__":
     torch.save(agent.actor.state_dict(), run_dir / "ppo_actor.pt")
     torch.save(agent.critic.state_dict(), run_dir / "ppo_critic.pt")
 
-    wandb.save(str(run_dir / "ppo_actor.pt"))
-    wandb.save(str(run_dir / "ppo_critic.pt"))
+    if upload_wandb:
+        wandb.save(str(run_dir / "ppo_actor.pt"))
+        wandb.save(str(run_dir / "ppo_critic.pt"))
 
     # === 儲存紀錄 ===
     if config["logging"]["save_summary"]:
