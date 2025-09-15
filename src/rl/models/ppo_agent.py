@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import platform
+import wandb
 from torch.distributions import Categorical
 
 LARGE_NEG = -1e9
@@ -281,8 +282,23 @@ class PPOAgent:
         masks  = torch.tensor(masks,   dtype=torch.bool,    device=device)        
 
         # ---- GAE ----
-        returns, advantages = self._compute_gae(rews, dns, vals)
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        returns, advantages_raw = self._compute_gae(rews, dns, vals)
+        adv_mean_raw = advantages_raw.mean().item()
+        adv_std_raw  = advantages_raw.std().item()
+
+        # normalize
+        advantages = (advantages_raw - advantages_raw.mean()) / (advantages_raw.std() + 1e-8)
+        adv_mean_norm = advantages.mean().item()
+        adv_std_norm  = advantages.std().item()
+
+        # === W&B logging of advantages ===
+        if wandb.run is not None:
+            wandb.log({
+                "adv_mean_raw": adv_mean_raw,
+                "adv_std_raw": adv_std_raw,
+                "adv_mean_norm": adv_mean_norm,
+                "adv_std_norm": adv_std_norm,
+            })
 
         N = obs.size(0)
         entropies = []
