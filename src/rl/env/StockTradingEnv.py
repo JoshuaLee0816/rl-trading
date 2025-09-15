@@ -304,9 +304,9 @@ class StockTradingEnv(gym.Env):
                 floating_ret = (cur_price - self.avg_costs[i]) / self.avg_costs[i]
                 if floating_ret < 0:
                     # 線性懲罰
-                    penalty += abs(floating_ret) * 0.05   # α=0.05，可調
-                    # 或改成指數型懲罰
-                    # penalty += (np.exp(-5 * floating_ret) - 1)
+                    # penalty += abs(floating_ret) * 0.05   # α=0.05，可調
+                    # 指數型懲罰
+                    penalty += (np.exp(-5 * floating_ret) - 1)*0.1
         reward -= penalty
 
         self._t += 1
@@ -314,7 +314,7 @@ class StockTradingEnv(gym.Env):
         obs = self._make_obs(self._t)
         next_mask = self._build_action_mask(self._t)
 
-        # === 新增 holdings_detail ===
+        # holdings_detail
         holdings_detail = {
             s: {
                 "stock_id": self.ids[i] if i is not None else None,
@@ -344,7 +344,7 @@ class StockTradingEnv(gym.Env):
             "baseline_return": baseline_return,
             "trade_count": self.trade_count,
             "slots_mapping": {s: (self.ids[i] if i is not None else None) for s, i in enumerate(self.slots)},
-            "holdings_detail": holdings_detail,   # <── 新增
+            "holdings_detail": holdings_detail,   
         }
 
         return obs, reward, terminated, False, info
