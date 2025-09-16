@@ -10,6 +10,7 @@ import torch
 import gymnasium as gym
 import wandb
 import time
+import matplotlib.pyplot as plt
 from pathlib import Path
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv
 from tqdm import trange
@@ -25,6 +26,7 @@ if str(SRC_DIR) not in sys.path:
 from rl.models.ppo_agent import PPOAgent
 from rl.env.StockTradingEnv import StockTradingEnv
 from rl.train.logger import RunLogger
+from rl.test.ppo_test import run_test_once   # ✅ 引用測試 function
 
 
 def split_infos(infos):
@@ -55,6 +57,7 @@ def normalize_mask_batch(mask_any):
 
 if __name__ == "__main__":
     episode_entropy = []
+    recent_curves = []   # ✅ 用來存最近10條測試曲線
 
     # === 讀取 config.yaml ===
     with open(ROOT / "config.yaml", "r", encoding="utf-8") as f:
@@ -65,7 +68,7 @@ if __name__ == "__main__":
     save_freq = config["training"]["save_freq"]
     upload_wandb = config["training"]["upload_wandb"]
 
-    ckpt_freq = 100   # 每多少 episodes 存一次 checkpoint
+    ckpt_freq = 1  # 每多少 episodes 存一次 checkpoint
     max_ckpts = 10    # 最多保留 10 個
 
     ppo_cfg = config.get("ppo", {})
@@ -82,7 +85,6 @@ if __name__ == "__main__":
 
     # ---- 初始化 W&B ----
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    
     if upload_wandb:
         wandb.init(
             project="rl-trading",
@@ -97,7 +99,7 @@ if __name__ == "__main__":
     run_dir = outdir / f"run_{run_id}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(run_dir / "config.yaml", "w") as f:
+    with open(run_dir / "config.yaml", "w", encoding="utf-8") as f:
         yaml.dump(config, f)
 
     # === 載入資料 ===
@@ -108,13 +110,11 @@ if __name__ == "__main__":
     else:
         df = pd.read_csv(data_path, parse_dates=["date"])
 
-    # ---- 根據 config 過濾欄位 ----
     selected_feats = config["data"].get("features", None)
     if selected_feats is not None:
         keep_cols = ["date", "stock_id"] + selected_feats
         df = df[[c for c in keep_cols if c in df.columns]]
 
-    print("DataFrame 欄位：", df.columns.tolist())
     ids = sorted(df["stock_id"].unique())
     num_stocks = len(ids)
 
@@ -133,10 +133,8 @@ if __name__ == "__main__":
 
     if use_subproc:
         env = AsyncVectorEnv([make_env for _ in range(num_envs)])
-        print(f"[INFO] PPO 使用 SubprocVectorEnv 並行 {num_envs} 個環境")
     else:
         env = SyncVectorEnv([make_env for _ in range(num_envs)])
-        print(f"[INFO] PPO 使用 SyncVectorEnv 並行 {num_envs} 個環境")
 
     # === 初始化 agent ===
     if hasattr(env, "single_observation_space"):
@@ -147,7 +145,6 @@ if __name__ == "__main__":
         single_as = env.action_space
 
     obs_dim = int(np.prod(single_os.shape))
-
     if isinstance(single_as, gym.spaces.Box):
         action_dim = int(np.prod(single_as.shape))
     elif isinstance(single_as, gym.spaces.MultiDiscrete):
@@ -177,20 +174,16 @@ if __name__ == "__main__":
             obs, infos = env.reset()
             infos_list = split_infos(infos)
             daily_returns = []
-            ep_trade_counts = [0 for _ in range(num_envs)]  # 每個環境 episode 的交易次數
+            ep_trade_counts = [0 for _ in range(num_envs)]
 
             action_mask_batch = normalize_mask_batch(infos.get("action_mask_3d", None))
-
             t_env_total, t_train_total, update_count = 0.0, 0.0, 0
 
             for t in range(agent.n_steps):
-                # === Env step timing ===
-                t0 = time.time()
                 batch_actions, batch_actions_flat, batch_logps, batch_values, batch_masks_flat = [], [], [], [], []
                 for i in range(int(getattr(obs, "shape", [env.num_envs])[0])):
                     obs_i = obs[i]
                     mask_i = action_mask_batch[i] if action_mask_batch is not None else None
-
                     if mask_i is not None:
                         mask_flat_i = agent.flatten_mask(mask_i)
                         if hasattr(mask_flat_i, "detach"):
@@ -198,11 +191,7 @@ if __name__ == "__main__":
                         mask_flat_i = mask_flat_i.astype(bool, copy=False)
                     else:
                         mask_flat_i = None
-
-                    action_tuple_i, action_flat_i, logp_i, value_i = agent.select_action(
-                        obs_i, action_mask_3d=mask_i
-                    )
-
+                    action_tuple_i, action_flat_i, logp_i, value_i = agent.select_action(obs_i, action_mask_3d=mask_i)
                     batch_actions.append(np.asarray(action_tuple_i, dtype=np.int64))
                     batch_actions_flat.append(int(action_flat_i))
                     batch_logps.append(float(logp_i))
@@ -211,11 +200,6 @@ if __name__ == "__main__":
 
                 actions = np.stack(batch_actions, axis=0).astype(np.int64)
                 next_obs, rewards, dones, truncs, infos = env.step(actions)
-                
-                t1 = time.time()
-                env_time = t1 - t0
-                t_env_total += env_time
-
                 action_mask_batch = normalize_mask_batch(infos.get("action_mask_3d", None))
                 infos_list = split_infos(infos)
 
@@ -230,46 +214,23 @@ if __name__ == "__main__":
                         batch_masks_flat[i],
                     )
                     logger.log_step(ep, infos_list[i])
-
-                    """
-                    # === Debug: 印出 slot 狀態 ===
-                    if "holdings_detail" in infos_list[i]:
-                        print(f"[DEBUG][ep={ep} t={t}] env={i} holdings:")
-                        for slot, detail in infos_list[i]["holdings_detail"].items():
-                            print(f"   Slot {slot}: {detail}")
-                    """
-                    
-                    # 讀取 trade_count
                     if "trade_count" in infos_list[i]:
                         ep_trade_counts[i] = infos_list[i]["trade_count"]
 
                 obs = next_obs
                 daily_returns.extend(rewards.tolist())
 
-            # === PPO update timing ===
-            t2 = time.time()
             agent.update()
-            t3 = time.time()
-            train_time = t3 - t2
-            t_train_total += train_time
-            update_count += 1
-
-            ratio = (t_env_total / t_train_total) if t_train_total > 0 else float("inf")
-            print(f"[Timing] Env step: {t_env_total:.6f}s | Train update: {t_train_total:.6f}s | Ratio (Env:Train) = {ratio:.2f}:1")
 
             if len(agent.entropy_log) > 0:
                 episode_entropy.append(agent.entropy_log[-1])
 
-            # === 報酬統計 ===
             R_total = np.sum(daily_returns)
             total_return = np.exp(R_total) - 1
             days = len(daily_returns) if len(daily_returns) > 0 else 1
             annualized_return = (1 + total_return) ** (252 / days) - 1
-
             ep_return = annualized_return * 100
             all_rewards.append(ep_return)
-
-            # 多環境 → 取平均交易數
             avg_trades = float(np.mean(ep_trade_counts))
 
             summary.append({
@@ -278,19 +239,18 @@ if __name__ == "__main__":
                 "avg_trade_count": avg_trades,
             })
 
-            # === W&B logging ===
+            # === W&B logging (Train) ===
             if upload_wandb and ep % 1 == 0:
                 wandb.log({
-                    "episode": ep,
-                    "annualized_return_pct": ep_return,
-                    "avg_trade_count": avg_trades,
-                    "baseline": 0.0,
-                    "actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
-                    "critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
-                    "entropy": episode_entropy[-1] if episode_entropy else None,
-                }, step = ep)
+                    "train/episode": ep,
+                    "train/annualized_return_pct": ep_return,
+                    "train/avg_trade_count": avg_trades,
+                    "train/actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
+                    "train/critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
+                    "train/entropy": episode_entropy[-1] if episode_entropy else None,
+                }, step=ep)
 
-            # === 定期存 checkpoint ===
+            # === 定期存 checkpoint & 測試 ===
             if ep % ckpt_freq == 0:
                 ckpt_path = run_dir / f"checkpoint_ep{ep}.pt"
                 torch.save({
@@ -298,14 +258,42 @@ if __name__ == "__main__":
                     "critic": agent.critic.state_dict(),
                     "episode": ep
                 }, ckpt_path)
-                print(f"Saved checkpoint: {ckpt_path}")
 
-                # 保留最近 10 個
+                # 保留最近 10 個 checkpoint
                 ckpts = sorted(run_dir.glob("checkpoint_ep*.pt"))
                 if len(ckpts) > max_ckpts:
                     for old_ckpt in ckpts[:-max_ckpts]:
                         old_ckpt.unlink()
-                        print(f"Removed old checkpoint: {old_ckpt}")
+
+                # === 呼叫測試 ===
+                data_path_test = ROOT / "data" / "processed" / "full" / "walk_forward" / "WF_test_2020_full.parquet"
+                config_path = ROOT / "config.yaml"
+                total_ret, max_dd, df_perf, df_baseline = run_test_once(
+                    ckpt_path, data_path_test, config_path, plot=False, save_trades=False, tag=f"ep{ep}",verbose=False  # 關掉 print
+                )
+
+                # 更新最近 10 條曲線
+                recent_curves.append((ep, df_perf))
+                if len(recent_curves) > 10:
+                    recent_curves.pop(0)
+
+                # 畫比較圖
+                plt.figure(figsize=(10, 6))
+                for ep_id, df_c in recent_curves:
+                    plt.plot(df_c.index, df_c["value"], label=f"ep{ep_id}")
+                plt.plot(df_baseline.index, df_baseline["baseline"], label="Baseline (0050)", linestyle="--", color="black")
+                plt.title("Portfolio Value Comparison (Recent 10 Checkpoints)")
+                plt.xlabel("Date")
+                plt.ylabel("Value")
+                plt.legend()
+                plt.grid(True)
+                if upload_wandb:
+                    wandb.log({
+                        "test/total_return": total_ret,
+                        "test/max_drawdown": max_dd,
+                        "test/portfolio_curves": wandb.Image(plt)
+                    }, step=ep)
+                plt.close()
 
     finally:
         try:
@@ -321,7 +309,6 @@ if __name__ == "__main__":
         wandb.save(str(run_dir / "ppo_actor.pt"))
         wandb.save(str(run_dir / "ppo_critic.pt"))
 
-    # === 儲存紀錄 ===
     if config["logging"]["save_summary"]:
         pd.DataFrame(summary).to_csv(run_dir / "summary.csv", index=False)
 
