@@ -6,12 +6,13 @@ import sys
 PROJ_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(PROJ_ROOT))
 
-MODE = "full"   # "full" (全股池) / "sample20" (隨機20檔)
+MODE = "full_300"   # === _300 方便區分 ===
 
 RAW_FILE = PROJ_ROOT / "data" / "raw" / "ALL_RAW_DATA_2015_2024_wide.csv"
 OUT_DIR = PROJ_ROOT / "data" / "processed" / MODE
 WF_DIR = OUT_DIR / "walk_forward"
 
+# === _300 ===
 FEATURE_LONG_FILE = OUT_DIR / f"ALL_feature_long_2015_2024_{MODE}.parquet"
 SUMMARY_FILE = WF_DIR / f"WF_summary_2015_2024_{MODE}.csv"
 
@@ -93,7 +94,8 @@ def main():
     stock_ids = sorted({c.split("_")[0] for c in df.columns if c.endswith("_close")})
     print(f"[INFO] total {len(stock_ids)} stocks in dataset (MODE={MODE})")
 
-    clean_frames = []
+    # === 初步清理 (先丟掉缺漏太多的股票) ===
+    pre_clean_frames = []
     for sid in stock_ids:
         cols = [f"{sid}_open", f"{sid}_high", f"{sid}_low", f"{sid}_close",
                 f"{sid}_volume", f"{sid}_cash_dividend", f"{sid}_stock_dividend"]
@@ -102,15 +104,45 @@ def main():
 
         missing_ratio = sub.isna().mean().max() if not sub.empty else 1.0
         if missing_ratio > 0.1:
-            print(f"[DROP] {sid} missing {missing_ratio:.1%}, skip.")
+            print(f"[DROP] {sid} missing {missing_ratio:.1%}, skip (before turnover calc).")
             continue
 
         sub = sub.ffill().bfill()
-        clean_frames.append(sub)
+        pre_clean_frames.append(sub)
 
-    if not clean_frames:
-        print("[ERROR] no stocks left after cleaning")
+    if not pre_clean_frames:
+        print("[ERROR] no stocks left after initial cleaning")
         return
+
+    pre_clean_df = pd.concat(pre_clean_frames, axis=1).sort_index()
+
+    # === 計算平均成交金額 (price * volume) ===
+    avg_turnover = {}
+    for sid in stock_ids:
+        if f"{sid}_close" in pre_clean_df.columns and f"{sid}_volume" in pre_clean_df.columns:
+            turnover = pre_clean_df[f"{sid}_close"] * pre_clean_df[f"{sid}_volume"]
+            avg_turnover[sid] = turnover.mean(skipna=True)
+
+    # === 挑前300檔 ===
+    top300 = sorted(avg_turnover.items(), key=lambda x: x[1], reverse=True)[:300]
+    top300_ids = {sid for sid, _ in top300}
+    print(f"[INFO] selected top {len(top300_ids)} stocks by avg turnover")
+
+    # === 存出 Top300 股票清單 ===
+    top300_df = pd.DataFrame(top300, columns=["stock_id", "avg_turnover"])
+    top300_file = OUT_DIR / f"top300_list_{MODE}.csv"
+    top300_df.to_csv(top300_file, index=False)
+    print(f"[OK] saved top300 list -> {top300_file}")
+
+    # === 只保留前300檔 ===
+    clean_frames = []
+    for sid in top300_ids:
+        cols = [f"{sid}_open", f"{sid}_high", f"{sid}_low", f"{sid}_close",
+                f"{sid}_volume", f"{sid}_cash_dividend", f"{sid}_stock_dividend"]
+        sub_cols = [c for c in cols if c in df.columns]
+        sub = df.reindex(columns=sub_cols).copy()
+        sub = sub.ffill().bfill()
+        clean_frames.append(sub)
 
     clean_df = pd.concat(clean_frames, axis=1).sort_index()
 
@@ -157,6 +189,7 @@ def main():
         train_start = train["date"].dt.year.min()
         train_end = train["date"].dt.year.max()
 
+        # === 修改：輸出檔案名也加上 _300 ===
         train_file = WF_DIR / f"WF_train_{train_start}_{train_end}_{MODE}.parquet"
         test_file = WF_DIR / f"WF_test_{test_year}_{MODE}.parquet"
 

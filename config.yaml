@@ -10,7 +10,7 @@ training:
 
 data:
   #file: "stocks_20_with_market_index_2015-2020_long.parquet"
-  file: "full/walk_forward/WF_train_2015_2019_full.parquet"     #路徑注意
+  file: "full_300/walk_forward/WF_train_2015_2019_full_300.parquet"     #路徑注意
   features: ['open', 'high', 'low', 'close', 'volume', 'MA5', 'MA34', 'MA60', 'VMA20', 'VMA60', 'rsi14']  # 要保留的特徵
   #features: ['open', 'high', 'low', 'close', 'volume', 'cash_dividend', 'stock_dividend', 'MA5', 'MA20', 'MA34', 'MA60', 'MA120', 'VMA20', 'VMA60', 'rsi14', 'macd', 'macd_signal', 'macd_hist']  # 要保留的特徵
 
