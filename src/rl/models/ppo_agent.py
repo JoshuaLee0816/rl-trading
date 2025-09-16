@@ -137,7 +137,10 @@ class PPOAgent:
                 self.device = torch.device("cpu")
         else:
             self.device = torch.device("cpu")
-        print(f"[INFO] Using device: {self.device}")
+            
+        if not hasattr(PPOAgent, "_printed_device"):
+            print(f"[INFO] Using device: {self.device}")
+            PPOAgent._printed_device = True
 
         # endregion 選擇device
 
