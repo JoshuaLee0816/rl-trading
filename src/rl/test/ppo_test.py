@@ -132,8 +132,13 @@ def run_test_once(actor_path, data_path, config_path,
 
 # === 主程式（獨立跑測試用） ===
 if __name__ == "__main__":
-    ACTOR_PATH = "logs/runs/run_20250916_131514/checkpoint_ep1.pt"
-    DATA_PATH = "data/processed/full/walk_forward/WF_test_2020_full.parquet"
+    run_dirs = sorted((ROOT / "logs" / "runs").glob("run_*"))
+    latest_run = run_dirs[-1]
+    ACTOR_PATH = latest_run / "ppo_actor.pt"
+
+    print(ACTOR_PATH)
+
+    DATA_PATH = "data/processed/full_300/walk_forward/WF_test_2020_full_300.parquet"
     CONFIG_PATH = ROOT / "config.yaml"
 
     run_test_once(ACTOR_PATH, DATA_PATH, CONFIG_PATH,

@@ -268,9 +268,13 @@ if __name__ == "__main__":
                 # === 呼叫測試 ===
                 data_path_test = ROOT / "data" / "processed" / "full" / "walk_forward" / "WF_test_2020_full.parquet"
                 config_path = ROOT / "config.yaml"
-                total_ret, max_dd, df_perf, df_baseline = run_test_once(
-                    ckpt_path, data_path_test, config_path, plot=False, save_trades=False, tag=f"ep{ep}",verbose=False  # 關掉 print
-                )
+                
+                if ckpt_path is not None and ckpt_path.exists():
+                    total_ret, max_dd, df_perf, df_baseline = run_test_once(
+                        ckpt_path, data_path_test, config_path, plot=False, save_trades=False, tag=f"ep{ep}", verbose=False
+                    )
+                
+
 
                 # 更新最近 10 條曲線
                 recent_curves.append((ep, df_perf))
