@@ -55,10 +55,25 @@ def normalize_mask_batch(mask_any):
         return mask_any.astype(bool, copy=False)
     return _np.stack(list(mask_any), axis=0).astype(bool, copy=False)
 
+def _infer_spaces_and_dims(env):
+    os_ = getattr(env, "single_observation_space", env.observation_space)
+    as_ = getattr(env, "single_action_space", env.action_space)
+
+    obs_dim = int(np.prod(os_.shape))
+    if isinstance(as_, gym.spaces.MultiDiscrete):
+        action_dim = int(np.prod(as_.nvec))
+    elif isinstance(as_, gym.spaces.Discrete):
+        action_dim = int(as_.n)
+    elif isinstance(as_, gym.spaces.Box):
+        action_dim = int(np.prod(as_.shape))
+    else:
+        raise ValueError(f"Unsupported action_space: {type(as_)} | {as_!r}")
+    return os_, as_, obs_dim, action_dim
+
 
 if __name__ == "__main__":
+
     episode_entropy = []
-    
 
     # === 讀取 config.yaml ===
     with open(ROOT / "config.yaml", "r", encoding="utf-8") as f:
@@ -83,7 +98,6 @@ if __name__ == "__main__":
     action_mode = str(config["environment"]["action_mode"]).lower().strip()
     max_holdings = config["environment"].get("max_holdings", None)
     qmax_per_trade = int(config["environment"].get("qmax_per_trade", 1))
-
 
     recent_curves = deque(maxlen = max_ckpts)
 
@@ -141,22 +155,7 @@ if __name__ == "__main__":
         env = SyncVectorEnv([make_env for _ in range(num_envs)])
 
     # === 初始化 agent ===
-    if hasattr(env, "single_observation_space"):
-        single_os = env.single_observation_space
-        single_as = env.single_action_space
-    else:
-        single_os = env.observation_space
-        single_as = env.action_space
-
-    obs_dim = int(np.prod(single_os.shape))
-    if isinstance(single_as, gym.spaces.Box):
-        action_dim = int(np.prod(single_as.shape))
-    elif isinstance(single_as, gym.spaces.MultiDiscrete):
-        action_dim = int(np.prod(single_as.nvec))
-    elif isinstance(single_as, gym.spaces.Discrete):
-        action_dim = single_as.n
-    else:
-        raise ValueError(f"Unsupported action_space type: {type(single_as)}")
+    single_os, single_as, obs_dim, action_dim = _infer_spaces_and_dims(env)
 
     agent = PPOAgent(
         obs_dim=obs_dim,
