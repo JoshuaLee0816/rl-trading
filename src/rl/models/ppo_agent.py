@@ -221,27 +221,29 @@ class PPOAgent:
         """
         self.actor.eval(); self.critic.eval()
 
-        # 1) to tensor & normalized
-        obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)  # obs 轉成tensor shape = (1, obs_dim)
-        obs_t = (obs_t - obs_t.mean()) / (obs_t.std() + 1e-8)                               # 送進網路錢先進行標準化obs
-        mask_flat = self.flatten_mask(action_mask_3d).unsqueeze(0)                          # 只允許True in Mask
+        # 在 rollout 階段關閉梯度，避免建立無用計算圖（省記憶體、加速）
+        with torch.no_grad():
+            # 1) to tensor & normalized
+            obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)  # obs 轉成tensor shape = (1, obs_dim)
+            obs_t = (obs_t - obs_t.mean()) / (obs_t.std() + 1e-8)                               # 送進網路錢先進行標準化obs
+            mask_flat = self.flatten_mask(action_mask_3d).unsqueeze(0)                          # 只允許True in Mask
 
-        # 2) logits -> masked categorical
-        """
-        logits = Actor 對所有動作的raw 分數
-        """
-        logits = self.actor(obs_t)                   # (1, A)
-        masked_logits = logits.masked_fill(~mask_flat, LARGE_NEG) #把非法動作設成極小值，這樣softmax後幾乎是0
-        dist = Categorical(logits=masked_logits)     # 內部會做 softmax,建立一個類別分布物件，方便抽樣與計算log_prob
+            # 2) logits -> masked categorical
+            """
+            logits = Actor 對所有動作的raw 分數
+            """
+            logits = self.actor(obs_t)                   # (1, A)
+            masked_logits = logits.masked_fill(~mask_flat, LARGE_NEG) #把非法動作設成極小值，這樣softmax後幾乎是0
+            dist = Categorical(logits=masked_logits)     # 內部會做 softmax,建立一個類別分布物件，方便抽樣與計算log_prob
 
-        # 3) sample + log_prob + value
-        a_flat = dist.sample()                       # 從分布中抽樣出一個動作
-        logp   = dist.log_prob(a_flat)               # 該動作的對數機率,更新PPO會用到
-        value  = self.critic(obs_t)                  # value 預測in Critic
+            # 3) sample + log_prob + value
+            a_flat = dist.sample()                       # 從分布中抽樣出一個動作
+            logp   = dist.log_prob(a_flat)               # 該動作的對數機率,更新PPO會用到
+            value  = self.critic(obs_t)                  # value 預測in Critic
 
-        # 4) 還原為 (op, idx, q)
-        a_flat_int = int(a_flat.item())
-        action_tuple = self.flat_to_tuple(a_flat_int)
+            # 4) 還原為 (op, idx, q)
+            a_flat_int = int(a_flat.item())
+            action_tuple = self.flat_to_tuple(a_flat_int)
 
         return (
             action_tuple,       #給env.step()
