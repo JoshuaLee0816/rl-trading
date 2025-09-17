@@ -1,42 +1,68 @@
 training:
   model: "ppo"              # 控制哪個 model 執行
-  n_episodes: 10000          # 總訓練集數
-  save_freq: 5              # 每幾集更新一次 reward_curve.png
+  n_episodes: 10000         # 總訓練集數
   seed: 42                  # 隨機種子
-  update_every: 256          # 每幾步更新一次 
-  warmup_steps: 10000       # 至少先收多少步資料再開始更新
-  grad_steps: 1            # 每次觸發時連續更新幾次
-  upload_wandb: true        # 要不要upload to wandb
-  load_checkpoint: false
-  ckpt_freq : 50
-  max_ckpts: 5
+  upload_wandb: true        # 要不要上傳到 W&B
+  ckpt_freq: 50             # 每多少 episodes 存一次 checkpoint
+  max_ckpts: 5              # 最多保留的 checkpoint 數
+
+  # ↓ 以下鍵目前未在 src/rl/train/ppo_train.py 使用（保留以後擴充）
+  save_freq: 5              # 每幾集更新一次圖（目前未用）
+  update_every: 256         # 每幾步更新一次（未用）
+  warmup_steps: 10000       # 開始更新前先收集步數（未用）
+  grad_steps: 1             # 每次觸發連續更新幾次（未用）
+  load_checkpoint: false    # 是否從檢查點載入（未用）
 
 data:
-  #file: "stocks_20_with_market_index_2015-2020_long.parquet"
-  file: "full_300/walk_forward/WF_train_2015_2019_full_300.parquet"     #路徑注意
-  features: ['open', 'high', 'low', 'close', 'volume', 'MA5', 'MA34', 'MA60', 'VMA20', 'VMA60', 'rsi14']  # 要保留的特徵
+  # file: "stocks_20_with_market_index_2015-2020_long.parquet"
+  file: "full_300/walk_forward/WF_train_2015_2019_full_300.parquet"  # 資料檔路徑
+  features: ["open", "high", "low", "close", "volume", "MA5", "MA34", "MA60", "VMA20", "VMA60", "rsi14"]
   #features: ['open', 'high', 'low', 'close', 'volume', 'cash_dividend', 'stock_dividend', 'MA5', 'MA20', 'MA34', 'MA60', 'MA120', 'VMA20', 'VMA60', 'rsi14', 'macd', 'macd_signal', 'macd_hist']  # 要保留的特徵
 
 safety:
-  cool_down_every: 500      # 每多少 episodes 強制休息
-  sleep_seconds: 120        # 休息幾秒
+  cool_down_every: 500      # 每多少 episodes 強制休息（目前未用）
+  sleep_seconds: 120        # 休息秒數（目前未用）
 
 environment:
-  initial_cash: 100000      # 初始資金（10萬）
+  initial_cash: 100000      # 初始資金
   lookback: 15              # 向前看的天數
-  reward_mode: "daily_return"   # 可選 daily_return / total_profit
-  action_mode: "discrete"
-  max_holdings: 3           # 最多同時持有幾檔股票
-  qmax_per_trade: 10        # 單檔股票單次最大交易張數
+  reward_mode: "daily_return"   # "daily_return" | "total_profit"
+  action_mode: "discrete"   # 動作模式
+  max_holdings: 3           # 最多同時持有幾檔
+  qmax_per_trade: 10        # 單檔單次最大交易張數
 
 logging:
   outdir: "logs/runs"       # 輸出目錄
-  save_summary: false        # 是否存 summary.csv
-  save_trades: false        # 是否存 trades_all.csv 目前沒有控制到
-  trade_sample_freq: 1      # 每幾筆交易存一次
-  wandb_every: 1             # 每幾個 episode 紀錄一次到 W&B
+  save_summary: false       # 是否存 summary.csv
+  save_trades: false        # 是否存 trades_all.csv（目前未用）
+  trade_sample_freq: 1      # 每幾筆交易存一次（寫入 RunLogger）
+  wandb_every: 1            # 每幾個 episode 紀錄一次到 W&B（你已在程式採用）
 
-dqn:
+ppo:
+  # 執行設備與並行
+  device: "cpu"
+  num_envs: 1
+  use_subproc: false
+
+  # 演算法超參數
+  gamma: 0.998
+  gae_lambda: 0.95
+  clip_epsilon: 0.2
+  entropy_coef: 0.1
+  value_coef: 0.5
+
+  # 最佳化與批次
+  actor_lr: 0.00001
+  critic_lr: 0.00003
+  batch_size: 64
+  n_steps: 512
+  epochs: 1                 # 每次 update 的 epoch 數
+
+  # 網路結構
+  actor_hidden: 64
+  critic_hidden: 64
+
+dqn:                         # 目前未用（model=ppo 時忽略）
   gamma: 0.99
   epsilon_schedule: "per_episode"   # "per_episode" | "per_step"
   epsilon_start: 1.0
@@ -46,21 +72,4 @@ dqn:
   batch_size: 64
   buffer_size: 10000
   target_update_freq: 100
-  device: "auto"           # "cpu"、"mps"、"cuda"、"auto"
-
-ppo:
-  gamma: 0.998
-  gae_lambda: 0.95
-  clip_epsilon: 0.2
-  actor_lr: 0.00001
-  critic_lr: 0.00003        #critic lr > action lr
-  batch_size: 64
-  n_steps: 512
-  epochs: 1                #?????
-  entropy_coef: 0.1
-  value_coef: 0.5
-  device: "cpu"
-  num_envs: 1
-  use_subproc: false
-  actor_hidden: 64         # Actor 隱藏層維度
-  critic_hidden: 64        # Critic 隱藏層維度 是否加上L2 正則化
+  device: "auto"            # "cpu" | "mps" | "cuda" | "auto"
