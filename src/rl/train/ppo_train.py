@@ -161,6 +161,8 @@ if __name__ == "__main__":
     else:
         env = SyncVectorEnv([make_env for _ in range(num_envs)])
 
+    n_envs = getattr(env, "num_envs", num_envs)  # 統一使用的環境數
+
     # === 初始化 agent ===
     single_os, single_as, obs_dim, action_dim = _infer_spaces_and_dims(env)
 
@@ -191,7 +193,7 @@ if __name__ == "__main__":
 
             for t in range(agent.n_steps):
                 batch_actions, batch_actions_flat, batch_logps, batch_values, batch_masks_flat = [], [], [], [], []
-                for i in range(int(getattr(obs, "shape", [env.num_envs])[0])):
+                for i in range(n_envs):
                     obs_i = obs[i]
                     mask_i = action_mask_batch[i] if action_mask_batch is not None else None
                     if mask_i is not None:
