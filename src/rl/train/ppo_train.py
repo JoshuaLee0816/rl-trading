@@ -29,6 +29,7 @@ from rl.env.StockTradingEnv import StockTradingEnv
 from rl.train.logger import RunLogger
 from rl.test.ppo_test import run_test_once   # ✅ 引用測試 function
 
+# region 小工具部分
 
 def split_infos(infos):
     if isinstance(infos, dict) and isinstance(list(infos.values())[0], (np.ndarray, list)):
@@ -41,7 +42,6 @@ def split_infos(infos):
         return [infos]
     else:
         return infos
-
 
 def normalize_mask_batch(mask_any):
     import numpy as _np
@@ -70,6 +70,61 @@ def _infer_spaces_and_dims(env):
         raise ValueError(f"Unsupported action_space: {type(as_)} | {as_!r}")
     return os_, as_, obs_dim, action_dim
 
+def save_checkpoint(run_dir: Path, agent, ep: int) -> Path:
+    ckpt_path = run_dir / f"checkpoint_ep{ep}.pt"
+    torch.save({
+        "actor": agent.actor.state_dict(),
+        "critic": agent.critic.state_dict(),
+        "episode": ep
+    }, ckpt_path)
+    return ckpt_path
+
+def prune_checkpoints(run_dir: Path, max_ckpts: int) -> None:
+    ckpts = sorted(run_dir.glob("checkpoint_ep*.pt"))
+    if len(ckpts) > max_ckpts:
+        for old_ckpt in ckpts[:-max_ckpts]:
+            try:
+                old_ckpt.unlink()
+            except Exception:
+                pass
+
+def run_eval_and_plot(
+    ckpt_path: Path,
+    config_path: Path,
+    data_path_test: Path,
+    ep: int,
+    recent_curves,
+    upload_wandb: bool
+):
+    # === 呼叫測試 ===
+    total_ret, max_dd, df_perf, df_baseline = run_test_once(
+        ckpt_path, data_path_test, config_path,
+        plot=False, save_trades=False, tag=f"ep{ep}", verbose=False
+    )
+
+    # 更新最近曲線
+    recent_curves.append((ep, df_perf))
+
+    # 畫比較圖（與原本相同）
+    plt.figure(figsize=(10, 6))
+    for ep_id, df_c in recent_curves:
+        plt.plot(df_c.index, df_c["value"], label=f"ep{ep_id}")
+    plt.plot(df_baseline.index, df_baseline["baseline"], label="Baseline (0050)", linestyle="--", color="black")
+    plt.title("Portfolio Value Comparison (Recent 10 Checkpoints)")
+    plt.xlabel("Date")
+    plt.ylabel("Value")
+    plt.legend()
+    plt.grid(True)
+    if upload_wandb:
+        wandb.log({
+            "test/total_return": total_ret,
+            "test/max_drawdown": max_dd,
+            "test/portfolio_curves": wandb.Image(plt)
+        }, step=ep)
+    plt.close()
+
+    return total_ret, max_dd, df_perf, df_baseline
+# endregion 小工具部分
 
 if __name__ == "__main__":
 
@@ -264,50 +319,15 @@ if __name__ == "__main__":
 
             # === 定期存 checkpoint & 測試 ===
             if ep % ckpt_freq == 0:
-                ckpt_path = run_dir / f"checkpoint_ep{ep}.pt"
-                torch.save({
-                    "actor": agent.actor.state_dict(),
-                    "critic": agent.critic.state_dict(),
-                    "episode": ep
-                }, ckpt_path)
+                ckpt_path = save_checkpoint(run_dir, agent, ep)
+                prune_checkpoints(run_dir, max_ckpts)
 
-                # 保留最近 10 個 checkpoint
-                ckpts = sorted(run_dir.glob("checkpoint_ep*.pt"))
-                if len(ckpts) > max_ckpts:
-                    for old_ckpt in ckpts[:-max_ckpts]:
-                        old_ckpt.unlink()
-
-                # === 呼叫測試 ===
                 data_path_test = ROOT / "data" / "processed" / "full" / "walk_forward" / "WF_test_2020_full.parquet"
-                config_path = ROOT / "config.yaml"
-                
-                if ckpt_path is not None and ckpt_path.exists():
-                    total_ret, max_dd, df_perf, df_baseline = run_test_once(
-                        ckpt_path, data_path_test, config_path, plot=False, save_trades=False, tag=f"ep{ep}", verbose=False
-                    )
-                
+                config_path    = ROOT / "config.yaml"
 
-
-                # 更新最近 10 條曲線
-                recent_curves.append((ep, df_perf))
-
-                # 畫比較圖
-                plt.figure(figsize=(10, 6))
-                for ep_id, df_c in recent_curves:
-                    plt.plot(df_c.index, df_c["value"], label=f"ep{ep_id}")
-                plt.plot(df_baseline.index, df_baseline["baseline"], label="Baseline (0050)", linestyle="--", color="black")
-                plt.title("Portfolio Value Comparison (Recent 10 Checkpoints)")
-                plt.xlabel("Date")
-                plt.ylabel("Value")
-                plt.legend()
-                plt.grid(True)
-                if upload_wandb:
-                    wandb.log({
-                        "test/total_return": total_ret,
-                        "test/max_drawdown": max_dd,
-                        "test/portfolio_curves": wandb.Image(plt)
-                    }, step=ep)
-                plt.close()
+                total_ret, max_dd, df_perf, df_baseline = run_eval_and_plot(
+                    ckpt_path, config_path, data_path_test, ep, recent_curves, upload_wandb
+                )
 
     finally:
         try:
