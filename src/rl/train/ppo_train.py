@@ -88,6 +88,18 @@ def prune_checkpoints(run_dir: Path, max_ckpts: int) -> None:
             except Exception:
                 pass
 
+def compute_episode_metrics(daily_returns: list[float]) -> dict:
+    R_total = float(np.sum(daily_returns)) if daily_returns else 0.0
+    total_return = float(np.exp(R_total) - 1.0)
+    days = len(daily_returns) if daily_returns else 1
+    annualized_return = float((1.0 + total_return) ** (252.0 / days) - 1.0)
+    return {
+        "R_total": R_total,
+        "total_return": total_return,
+        "days": days,
+        "annualized_pct": annualized_return * 100.0,
+    }
+
 def run_eval_and_plot(
     ckpt_path: Path,
     config_path: Path,
@@ -292,11 +304,8 @@ if __name__ == "__main__":
             if len(agent.entropy_log) > 0:
                 episode_entropy.append(agent.entropy_log[-1])
 
-            R_total = np.sum(daily_returns)
-            total_return = np.exp(R_total) - 1
-            days = len(daily_returns) if len(daily_returns) > 0 else 1
-            annualized_return = (1 + total_return) ** (252 / days) - 1
-            ep_return = annualized_return * 100
+            m = compute_episode_metrics(daily_returns)
+            ep_return = m["annualized_pct"]
             all_rewards.append(ep_return)
             avg_trades = float(np.mean(ep_trade_counts))
 
