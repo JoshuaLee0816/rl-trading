@@ -293,8 +293,6 @@ class PPOAgent:
 
         # normalize
         advantages = (advantages_raw - advantages_raw.mean()) / (advantages_raw.std() + 1e-8)
-        adv_mean_norm = advantages.mean().item()
-        adv_std_norm  = advantages.std().item()
 
         # === W&B logging of advantages ===
         if wandb.run is not None:
