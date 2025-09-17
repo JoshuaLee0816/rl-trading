@@ -9,7 +9,6 @@ import datetime
 import torch
 import gymnasium as gym
 import wandb
-import time
 import matplotlib.pyplot as plt
 from pathlib import Path
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv
@@ -234,7 +233,7 @@ if __name__ == "__main__":
     n_envs = getattr(env, "num_envs", num_envs)  # 統一使用的環境數
 
     # === 初始化 agent ===
-    single_os, single_as, obs_dim, action_dim = _infer_spaces_and_dims(env)
+    _, _, obs_dim, _ = _infer_spaces_and_dims(env)
 
     agent = PPOAgent(
         obs_dim=obs_dim,
@@ -254,7 +253,6 @@ if __name__ == "__main__":
     try:
         for ep in progress_bar:
             obs, infos = env.reset()
-            infos_list = split_infos(infos)
             daily_returns = []
             ep_trade_counts = [0 for _ in range(num_envs)]
 
