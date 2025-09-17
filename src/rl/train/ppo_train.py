@@ -78,28 +78,35 @@ if __name__ == "__main__":
     # === 讀取 config.yaml ===
     with open(ROOT / "config.yaml", "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
+    
+    # === 取出各區塊的別名 ===
+    train_cfg = config["training"]
+    env_cfg   = config["environment"]
+    log_cfg   = config["logging"]
+    data_cfg  = config["data"]
+    ppo_cfg   = config.get("ppo", {}) 
 
     # ---- 訓練設定 ----
-    n_episodes = config["training"]["n_episodes"]
-    save_freq = config["training"]["save_freq"]
-    upload_wandb = config["training"]["upload_wandb"]
+    n_episodes   = train_cfg["n_episodes"]
+    save_freq    = train_cfg["save_freq"]
+    upload_wandb = train_cfg["upload_wandb"]
 
-    ckpt_freq = config["training"]["ckpt_freq"]  # 每多少 episodes 存一次 checkpoint
-    max_ckpts = config["training"]["max_ckpts"]
+    ckpt_freq = train_cfg["ckpt_freq"]      
+    max_ckpts = train_cfg["max_ckpts"]
 
-    ppo_cfg = config.get("ppo", {})
-    num_envs = ppo_cfg.get("num_envs", 2)
-    use_subproc = ppo_cfg.get("use_subproc", True)
+    num_envs    = ppo_cfg.get("num_envs")
+    use_subproc = ppo_cfg.get("use_subproc")
 
     # ---- 環境設定 ----
-    init_cash = config["environment"]["initial_cash"]
-    lookback = config["environment"]["lookback"]
-    reward_mode = str(config["environment"]["reward_mode"]).lower().strip()
-    action_mode = str(config["environment"]["action_mode"]).lower().strip()
-    max_holdings = config["environment"].get("max_holdings", None)
-    qmax_per_trade = int(config["environment"].get("qmax_per_trade", 1))
+    init_cash      = env_cfg["initial_cash"]
+    lookback       = env_cfg["lookback"]
+    reward_mode    = str(env_cfg["reward_mode"]).lower().strip()
+    action_mode    = str(env_cfg["action_mode"]).lower().strip()
+    max_holdings   = env_cfg.get("max_holdings")
+    qmax_per_trade = int(env_cfg.get("qmax_per_trade"))
 
-    recent_curves = deque(maxlen = max_ckpts)
+    # ---- 近期曲線容器 ----
+    recent_curves = deque(maxlen=max_ckpts)
 
     # ---- 初始化 W&B ----
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
