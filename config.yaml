@@ -34,6 +34,7 @@ logging:
   save_summary: false        # 是否存 summary.csv
   save_trades: false        # 是否存 trades_all.csv 目前沒有控制到
   trade_sample_freq: 1      # 每幾筆交易存一次
+  wandb_every: 1             # 每幾個 episode 紀錄一次到 W&B
 
 dqn:
   gamma: 0.99

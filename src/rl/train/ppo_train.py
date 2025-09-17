@@ -138,6 +138,7 @@ def run_eval_and_plot(
     return total_ret, max_dd, df_perf, df_baseline
 # endregion 小工具部分
 
+# region 主程式
 if __name__ == "__main__":
 
     episode_entropy = []
@@ -163,6 +164,8 @@ if __name__ == "__main__":
 
     num_envs    = ppo_cfg.get("num_envs")
     use_subproc = ppo_cfg.get("use_subproc")
+
+    wandb_every       = log_cfg.get("wandb_every")
 
     # ---- 環境設定 ----
     init_cash      = env_cfg["initial_cash"]
@@ -316,7 +319,7 @@ if __name__ == "__main__":
             })
 
             # === W&B logging (Train) ===
-            if upload_wandb and ep % 1 == 0:
+            if upload_wandb and (ep % wandb_every) == 0:
                 wandb.log({
                     "train/episode": ep,
                     "train/annualized_return_pct": ep_return,
@@ -356,3 +359,5 @@ if __name__ == "__main__":
         pd.DataFrame(summary).to_csv(run_dir / "summary.csv", index=False)
 
     print(f"✅ Training finished. Model=PPO. Results saved in: {run_dir}")
+
+# endregion 主程式
