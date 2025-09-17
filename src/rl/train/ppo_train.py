@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv
 from tqdm import trange
+from collections import deque
 
 # === 專案路徑 ===
 HERE = Path(__file__).resolve()
@@ -57,7 +58,7 @@ def normalize_mask_batch(mask_any):
 
 if __name__ == "__main__":
     episode_entropy = []
-    recent_curves = []   # ✅ 用來存最近10條測試曲線
+    
 
     # === 讀取 config.yaml ===
     with open(ROOT / "config.yaml", "r", encoding="utf-8") as f:
@@ -69,7 +70,7 @@ if __name__ == "__main__":
     upload_wandb = config["training"]["upload_wandb"]
 
     ckpt_freq = config["training"]["ckpt_freq"]  # 每多少 episodes 存一次 checkpoint
-    max_ckpts = 5    # 最多保留 5 個
+    max_ckpts = config["training"]["max_ckpts"]
 
     ppo_cfg = config.get("ppo", {})
     num_envs = ppo_cfg.get("num_envs", 2)
@@ -82,6 +83,9 @@ if __name__ == "__main__":
     action_mode = str(config["environment"]["action_mode"]).lower().strip()
     max_holdings = config["environment"].get("max_holdings", None)
     qmax_per_trade = int(config["environment"].get("qmax_per_trade", 1))
+
+
+    recent_curves = deque(maxlen = max_ckpts)
 
     # ---- 初始化 W&B ----
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -278,8 +282,6 @@ if __name__ == "__main__":
 
                 # 更新最近 10 條曲線
                 recent_curves.append((ep, df_perf))
-                if len(recent_curves) > 10:
-                    recent_curves.pop(0)
 
                 # 畫比較圖
                 plt.figure(figsize=(10, 6))
