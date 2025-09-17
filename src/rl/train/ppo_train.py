@@ -68,8 +68,8 @@ if __name__ == "__main__":
     save_freq = config["training"]["save_freq"]
     upload_wandb = config["training"]["upload_wandb"]
 
-    ckpt_freq = 1  # 每多少 episodes 存一次 checkpoint
-    max_ckpts = 10    # 最多保留 10 個
+    ckpt_freq = config["training"]["ckpt_freq"]  # 每多少 episodes 存一次 checkpoint
+    max_ckpts = 5    # 最多保留 5 個
 
     ppo_cfg = config.get("ppo", {})
     num_envs = ppo_cfg.get("num_envs", 2)

@@ -7,6 +7,8 @@ training:
   warmup_steps: 10000       # 至少先收多少步資料再開始更新
   grad_steps: 1            # 每次觸發時連續更新幾次
   upload_wandb: true        # 要不要upload to wandb
+  load_checkpoint: false
+  ckpt_freq : 50
 
 data:
   #file: "stocks_20_with_market_index_2015-2020_long.parquet"
@@ -57,6 +59,6 @@ ppo:
   value_coef: 0.5
   device: "cpu"
   num_envs: 1
-  use_subproc: True
+  use_subproc: false
   actor_hidden: 64         # Actor 隱藏層維度
   critic_hidden: 64        # Critic 隱藏層維度 是否加上L2 正則化

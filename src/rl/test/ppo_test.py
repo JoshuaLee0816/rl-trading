@@ -1,4 +1,5 @@
 import torch
+import os
 import sys
 import yaml
 import pandas as pd
@@ -61,12 +62,21 @@ def run_test_once(actor_path, data_path, config_path,
     agent = PPOAgent(obs_dim, len(ids), env.QMAX, ppo_cfg)
 
     # === 載入已訓練好的 actor 參數 ===
-    ckpt = torch.load(actor_path, map_location=agent.device)
-    if "actor" in ckpt:
-        agent.actor.load_state_dict(ckpt["actor"])
+    if full_cfg["training"].get("load_checkpoint", True) and actor_path is not None and os.path.exists(actor_path):
+        try:
+            ckpt = torch.load(actor_path, map_location=agent.device)
+            if "actor" in ckpt:
+                agent.actor.load_state_dict(ckpt["actor"])
+            else:
+                agent.actor.load_state_dict(ckpt)
+            agent.actor.eval()
+            print(f"[INFO] Loaded checkpoint from {actor_path}")
+        except Exception as e:
+            print(f"[WARN] Failed to load checkpoint: {e}. Using random init.")
     else:
-        agent.actor.load_state_dict(ckpt)
-    agent.actor.eval()
+        #print("[INFO] No checkpoint found or load_checkpoint=False. Using random init.")
+        pass
+
 
     # === 測試 loop ===
     dates, values, actions = [], [], []
@@ -116,7 +126,7 @@ def run_test_once(actor_path, data_path, config_path,
         plt.ylabel("Value")
         plt.legend()
         plt.grid(True)
-        plt.show()
+        #plt.show()
 
     # === 輸出交易紀錄 ===
     if save_trades:
@@ -136,7 +146,7 @@ if __name__ == "__main__":
     latest_run = run_dirs[-1]
     ACTOR_PATH = latest_run / "ppo_actor.pt"
 
-    print(ACTOR_PATH)
+    #print(ACTOR_PATH)
 
     DATA_PATH = "data/processed/full_300/walk_forward/WF_test_2020_full_300.parquet"
     CONFIG_PATH = ROOT / "config.yaml"
