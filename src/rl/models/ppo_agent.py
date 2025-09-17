@@ -9,7 +9,7 @@ from torch.distributions import Categorical
 
 LARGE_NEG = -1e9
 
-
+# region Actor/Critic Network
 # ===================== Actor / Critic =====================
 class Actor(nn.Module):
     """
@@ -53,6 +53,7 @@ class Critic(nn.Module):
     def forward(self, x):  # x: (B, obs_dim) (B是Bacth size, 然後去掉最後一dim可以計算loss)
         return self.net(x).squeeze(-1)  # (B,)
 
+# endregion Actor/Critic Network
 
 # ===================== Rollout Buffer =====================
 class RolloutBuffer:
@@ -353,25 +354,7 @@ class PPOAgent:
                 self.actor_optimizer.step()
                 self.critic_optimizer.step()
 
-
-            # Debug code 
-            """
-            print("[DEBUG] adv: mean={:.4f}, std={:.4f}".format(b_advs.mean().item(), b_advs.std().item()))
-            print("[DEBUG] ratio: mean={:.4f}, std={:.4f}".format(ratio.mean().item(), ratio.std().item()))
-            print("[DEBUG] actor_loss={:.6f}, critic_loss={:.6f}".format(actor_loss.item(), critic_loss.item()))
-            print("[DEBUG] entropy={:.4f}".format(entropy.item()))
-            print("[DEBUG] logits mean:", logits.mean().item(), "std:", logits.std().item())
-            """
-
         # endregion 小批次更新(mini-batch SGD)
-
-        
-        """
-        print("mask合法數:", b_mask[0].sum().item())
-        print("logits:", logits[0,:10].detach().cpu().numpy())  # 前10個動作
-        print("probs:", dist.probs[0,:10].detach().cpu().numpy())  # 前10個動作機率
-        print("entropy:", dist.entropy()[0].item())
-        """
 
         if entropies:
             self.entropy_log.append(float(np.mean(entropies)))
