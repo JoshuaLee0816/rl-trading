@@ -236,6 +236,8 @@ class PPOAgent:
           - action_flat:  int           -> 給 buffer 儲存
           - log_prob:     float
           - value:        float
+          - obs_flat_np:  np.ndarray    -> 展平 obs，交給 train loop
+          - mask_flat_np: np.ndarray    -> 動作 mask (A,)
         """
         self.actor.eval(); self.critic.eval()
 
@@ -248,48 +250,43 @@ class PPOAgent:
             z_flat = z.reshape(1, -1)           # (1, N*D)
 
             portfolio = torch.as_tensor(obs["portfolio"], dtype=torch.float32, device=self.device).unsqueeze(0)  # (1,1+N)
-            anchors = torch.as_tensor(obs.get("anchors", []), dtype=torch.float32, device=self.device).unsqueeze(0)  # (1,n_anchor)
+            anchors_raw = obs.get("anchors", None)
+            if anchors_raw is not None and len(anchors_raw) > 0:
+                anchors = torch.as_tensor(anchors_raw, dtype=torch.float32, device=self.device).unsqueeze(0)
+            else:
+                anchors = torch.zeros((1,0), dtype=torch.float32, device=self.device)
 
             obs_t = torch.cat([z_flat, portfolio, anchors], dim=1)  # (1, obs_dim)
             obs_t = (obs_t - obs_t.mean()) / (obs_t.std() + 1e-8)
 
-            """
-            obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)  # obs 轉成tensor shape = (1, obs_dim)
-            obs_t = (obs_t - obs_t.mean()) / (obs_t.std() + 1e-8)                               # 送進網路錢先進行標準化obs
-            """
-
             mask_flat = self.flatten_mask(action_mask_3d).unsqueeze(0)                          # 只允許True in Mask
 
             # 2) logits -> masked categorical
-            """
-            logits = Actor 對所有動作的raw 分數
-            """
             logits = self.actor(obs_t)                   # (1, A)
-            masked_logits = logits.masked_fill(~mask_flat, LARGE_NEG) #把非法動作設成極小值，這樣softmax後幾乎是0
-            dist = Categorical(logits=masked_logits)     # 內部會做 softmax,建立一個類別分布物件，方便抽樣與計算log_prob
+            masked_logits = logits.masked_fill(~mask_flat, LARGE_NEG)
+            dist = Categorical(logits=masked_logits)
 
             # 3) sample + log_prob + value
-            a_flat = dist.sample()                       # 從分布中抽樣出一個動作
-            logp   = dist.log_prob(a_flat)               # 該動作的對數機率,更新PPO會用到
-            value  = self.critic(obs_t)                  # value 預測in Critic
+            a_flat = dist.sample()
+            logp   = dist.log_prob(a_flat)
+            value  = self.critic(obs_t)
 
             # 4) 還原為 (op, idx, q)
             a_flat_int = int(a_flat.item())
             action_tuple = self.flat_to_tuple(a_flat_int)
 
-            # === 展平 obs 存 buffer ===
-            obs_flat_np = obs_t.squeeze(0).cpu().numpy()   # (obs_dim,)
-            self.store_transition(obs_flat_np, a_flat_int, reward=0.0, done=False,
-                                log_prob=float(logp.item()), value=float(value.item()),
-                                action_mask_flat=mask_flat.squeeze(0).cpu().numpy())
-            
-        return (
-            action_tuple,       #給env.step()
-            a_flat_int,         #給buffer 儲存
-            float(logp.item()),
-            float(value.item()), #算advantages
-        )
+            # === 展平 obs 交給 train loop ===
+            obs_flat_np  = obs_t.squeeze(0).cpu().numpy()
+            mask_flat_np = mask_flat.squeeze(0).cpu().numpy()
 
+        return (
+            action_tuple,      # 給 env.step()
+            a_flat_int,        # 給 buffer 儲存
+            float(logp.item()),
+            float(value.item()), # 算advantages
+            obs_flat_np,       # 展平 obs
+            mask_flat_np       # 動作 mask
+        )
     # endregion Select action 
 
     # region Store transition into Rollout Buffer 
