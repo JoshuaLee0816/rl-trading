@@ -101,7 +101,8 @@ class PPOAgent:
         self.value_coef   = float(config.get("value_coef", 0.5))
 
         # === 選擇 device ===
-        device_cfg = config.get("device", "auto")
+        ppo_cfg = config.get("ppo", {})
+        device_cfg = ppo_cfg.get("device", "auto")
         if device_cfg == "cpu":
             self.device = torch.device("cpu")
         elif device_cfg == "cuda" and torch.cuda.is_available():
