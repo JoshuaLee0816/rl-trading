@@ -271,7 +271,8 @@ if __name__ == "__main__":
                         mask_flat_i = mask_flat_i.astype(bool, copy=False)
                     else:
                         mask_flat_i = None
-                    action_tuple_i, action_flat_i, logp_i, value_i = agent.select_action(obs_i, action_mask_3d=mask_i)
+
+                    action_tuple_i, action_flat_i, logp_i, value_i, obs_flat_i, mask_flat_i = agent.select_action(obs_i, action_mask_3d=mask_i)
                     batch_actions.append(np.asarray(action_tuple_i, dtype=np.int64))
                     batch_actions_flat.append(int(action_flat_i))
                     batch_logps.append(float(logp_i))
@@ -285,13 +286,13 @@ if __name__ == "__main__":
 
                 for i in range(len(infos_list)):
                     agent.store_transition(
-                        obs[i],
-                        int(batch_actions_flat[i]),
+                        obs_flat_i,
+                        int(action_flat_i),
                         float(rewards[i]),
                         bool(dones[i]),
-                        float(batch_logps[i]),
-                        float(batch_values[i]),
-                        batch_masks_flat[i],
+                        float(logp_i),
+                        float(value_i),
+                        mask_flat_i,
                     )
                     logger.log_step(ep, infos_list[i])
                     if "trade_count" in infos_list[i]:
