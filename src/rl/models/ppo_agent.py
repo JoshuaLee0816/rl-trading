@@ -101,7 +101,8 @@ class PPOAgent:
     """
     # region PPO 初始化
     def __init__(self, obs_dim, num_stocks, qmax_per_trade, config):
-        self.obs_dim = int(obs_dim)
+        #self.obs_dim = int(obs_dim)
+
         self.N = int(num_stocks)
         self.QMAX = int(qmax_per_trade)           # 現實中買幾張其實跟金額有關，但這裡限制大概在10張只是為了要縮小維度 
         self.A = self.N * self.QMAX + self.N + 1  # 動作空間攤平成一維後的大小 (用於policy network 輸出成Logits)
@@ -160,14 +161,17 @@ class PPOAgent:
 
         # 總 obs 維度 = 股票編碼 + portfolio 狀態 + anchor
         anchors = int(config["model"].get("n_anchor", 0))
-        self.obs_dim = self.N * per_stock_dim + (1 + self.N) + anchors
+        self.obs_dim = self.N * per_stock_dim + (1 + self.N) + 2 * config["environment"]["max_holdings"] + anchors          #定義了維度
 
         # Actor Critic Optimizer初始化
-        self.actor  = Actor(self.obs_dim, self.N, self.QMAX, hidden_dim=config.get("actor_hidden")).to(self.device)
-        self.critic = Critic(self.obs_dim, hidden_dim=config.get("critic_hidden")).to(self.device)
+        ppo_cfg = config.get("ppo", {})  # 先抓出 ppo 區塊
+        self.actor  = Actor(self.obs_dim, self.N, self.QMAX, hidden_dim=ppo_cfg.get("actor_hidden", 64)).to(self.device)
+        self.critic = Critic(self.obs_dim, hidden_dim=ppo_cfg.get("critic_hidden", 64)).to(self.device)
 
-        self.actor_lr  = float(config.get("actor_lr"))
-        self.critic_lr = float(config.get("critic_lr"))
+
+        self.actor_lr  = float(ppo_cfg.get("actor_lr"))
+        self.critic_lr = float(ppo_cfg.get("critic_lr"))
+
         self.actor_optimizer  = optim.Adam(self.actor.parameters(),  lr=self.actor_lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_lr)
 
@@ -225,7 +229,7 @@ class PPOAgent:
         
     # endregion 一維 unflatten 還原成 三維
 
-    # region Select action 
+        # region Select action 
     def select_action(self, obs, action_mask_3d):
         """
         取得一個動作（抽樣版）：
@@ -243,20 +247,24 @@ class PPOAgent:
 
         # 在 rollout 階段關閉梯度，避免建立無用計算圖（省記憶體、加速）
         with torch.no_grad():
-            # 1) to tensor & normalized
-            # 假設 obs 是 dict: {"features": (N,F,K), "portfolio": (1+N,), "anchors": (n_anchor,)}
-            features_raw = torch.as_tensor(obs["features"], dtype=torch.float32, device=self.device).unsqueeze(0)  # (1,N,F,K)
-            z = self.encoder(features_raw)      # (1,N,D) or (1,N,F*K)
-            z_flat = z.reshape(1, -1)           # (1, N*D)
+            if isinstance(obs, dict):
+                # 假設 obs 是 dict: {"features": (N,F,K), "portfolio": (1+N,), "anchors": (n_anchor,)}
+                features_raw = torch.as_tensor(obs["features"], dtype=torch.float32, device=self.device).unsqueeze(0)  # (1,N,F,K)
+                z = self.encoder(features_raw)      # (1,N,D) or (1,N,F*K)
+                z_flat = z.reshape(1, -1)           # (1, N*D)
 
-            portfolio = torch.as_tensor(obs["portfolio"], dtype=torch.float32, device=self.device).unsqueeze(0)  # (1,1+N)
-            anchors_raw = obs.get("anchors", None)
-            if anchors_raw is not None and len(anchors_raw) > 0:
-                anchors = torch.as_tensor(anchors_raw, dtype=torch.float32, device=self.device).unsqueeze(0)
+                portfolio = torch.as_tensor(obs["portfolio"], dtype=torch.float32, device=self.device).unsqueeze(0)  # (1,1+N)
+                anchors_raw = obs.get("anchors", None)
+                if anchors_raw is not None and len(anchors_raw) > 0:
+                    anchors = torch.as_tensor(anchors_raw, dtype=torch.float32, device=self.device).unsqueeze(0)
+                else:
+                    anchors = torch.zeros((1,0), dtype=torch.float32, device=self.device)
+
+                obs_t = torch.cat([z_flat, portfolio, anchors], dim=1)  # (1, obs_dim)
             else:
-                anchors = torch.zeros((1,0), dtype=torch.float32, device=self.device)
+                # 假設 obs 已經是展平的一維向量
+                obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)  # (1, obs_dim)
 
-            obs_t = torch.cat([z_flat, portfolio, anchors], dim=1)  # (1, obs_dim)
             obs_t = (obs_t - obs_t.mean()) / (obs_t.std() + 1e-8)
 
             mask_flat = self.flatten_mask(action_mask_3d).unsqueeze(0)                          # 只允許True in Mask
@@ -288,6 +296,7 @@ class PPOAgent:
             mask_flat_np       # 動作 mask
         )
     # endregion Select action 
+
 
     # region Store transition into Rollout Buffer 
     """

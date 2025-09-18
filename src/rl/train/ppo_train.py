@@ -185,7 +185,7 @@ if __name__ == "__main__":
             name=f"run_{run_id}",
             group="full-data",
             job_type="train",
-            config=config
+            config=ppo_cfg
         )
 
     # ---- 輸出目錄 ----
@@ -236,7 +236,7 @@ if __name__ == "__main__":
     _, _, obs_dim, _ = _infer_spaces_and_dims(env)
 
     agent = PPOAgent(
-        obs_dim=obs_dim,
+        obs_dim=None,                       # 這個參數之後在 PPOAgent.__init__ 會忽略
         num_stocks=num_stocks,
         qmax_per_trade=qmax_per_trade,
         config=config,
