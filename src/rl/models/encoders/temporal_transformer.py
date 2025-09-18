@@ -51,20 +51,28 @@ class TemporalTransformerEncoder(nn.Module):
     def forward(self, x):  # x: [B, N, F, K]
         B, N, F, K = x.shape
 
-        # step1: 調整維度順序，把時間 K 放在中間 -> 只是為了符合transformer預期的維度順序 (PyToch 官方transformerencoderlayer要求)
+        # 調整維度順序，把時間 K 放在中間 -> 只是為了符合transformer預期的維度順序 (PyToch 官方transformerencoderlayer要求)
         x = x.permute(0,1,3,2)    # [B,N,F,K] -> [B,N,K,F]
 
-        # step2: 線性投影，把 F -> d_model
+        # 線性投影，把 F -> d_model   (每天的特徵向量 -> 投影到 Transformer 的工作空間 D 維)
         x = self.proj(x)          # [B,N,K,D]
 
-        # step3: 加位置編碼
+        # 加位置編碼
         x = self.pe(x)            # [B,N,K,D]
 
-        # step4: 丟進 Transformer encoder (在 K 維上做 self-attention)
+        # 丟進 Transformer encoder (在 K 維上做 self-attention)
         x = self.encoder(x)       # [B,N,K,D]
 
-        # step5: 對 K 做平均池化 → 一個股票一個向量
+        """
+        經過transformer後, 輸出是[B,N,K,D]
+        每一檔都有K天(Lookback)的D維embedding
+        但是Actor/Critic只吃"固定"長度的向量 不能帶著時間軸K
+        所以必須有一個 聚合(aggregation) 把K個embedding合成1個embedding
+
+        但要注意 我認為mean pooling是有可能lose時間序列的關係性 之後可以考慮換乘attention pooling 現在先用baseline處理
+        """
+        # 對 K 做mean pooling → 一個股票一個向量
         z = x.mean(dim=2)         # [B,N,D]
 
-        # step6: LayerNorm 清理數值
+        # LayerNorm 清理數值 避免梯度爆炸或不穩
         return self.out_ln(z)     # [B,N,D]
