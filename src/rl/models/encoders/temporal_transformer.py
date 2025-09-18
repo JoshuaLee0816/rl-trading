@@ -26,11 +26,14 @@ class PositionalEncoding(nn.Module):
 
 class TemporalTransformerEncoder(nn.Module):
     """
+    宣告一個模組處理每一檔的(特徵*時間窗)
     每檔股票共享的時間編碼器: (B, N, F, K) -> (B, N, D)
     """
     def __init__(self, F, d_model=48, n_heads=2, n_layers=1, dropout=0.1):
+
         super().__init__()
-        # 1) 先把每一天的 F 個特徵投影到 d_model 維
+
+        # 1) 先把每一天的 F 個特徵投影到 d_model 維 -> 得到一個每日embedding
         self.proj = nn.Linear(F, d_model)
 
         # 2) Transformer encoder layer
@@ -48,7 +51,7 @@ class TemporalTransformerEncoder(nn.Module):
     def forward(self, x):  # x: [B, N, F, K]
         B, N, F, K = x.shape
 
-        # step1: 調整維度順序，把時間 K 放在中間
+        # step1: 調整維度順序，把時間 K 放在中間 -> 只是為了符合transformer預期的維度順序 (PyToch 官方transformerencoderlayer要求)
         x = x.permute(0,1,3,2)    # [B,N,F,K] -> [B,N,K,F]
 
         # step2: 線性投影，把 F -> d_model
