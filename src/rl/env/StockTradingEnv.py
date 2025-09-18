@@ -1,9 +1,10 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import pandas as pd
-import gymnasium as gym
-from gymnasium import spaces
 
-class StockTradingEnv(gym.Env):
+class StockTradingEnv:
     """
     StockTradingEnv (Broker-style, 1 trade per day)
 
@@ -38,8 +39,6 @@ class StockTradingEnv(gym.Env):
        - info：紀錄當日動作、費稅、現金、持股數、下一步 action_mask
     """
 
-    metadata = {"render_modes": ["human"]}
-
     # region 初始化部分
     def __init__(
         self,
@@ -55,16 +54,20 @@ class StockTradingEnv(gym.Env):
         tax_sell: float = 0.003,
         lot_size: int = 1000,       #一張 = 1000股
         reward_mode: str = "daily_return",
-        action_mode: str = "discrete"
+        action_mode: str = "discrete",
+        device: str = "cpu"         # PyTorch 運算設備 (cpu/mps/cuda)
     ):
-        super().__init__()
 
         # baseline 0050 (不能交易，只能計算報酬)
         df_baseline = df[df["stock_id"] == "0050"].copy()
         if df_baseline.empty:
             raise ValueError("df 缺少 baseline stock_id = 0050 ")
         df_baseline = df_baseline.sort_values("date")
-        self.baseline_close = df_baseline["close"].to_numpy(dtype=np.float32)
+        self.baseline_close = torch.tensor(
+            df_baseline["close"].to_numpy(dtype=np.float32),
+            dtype=torch.float32,
+            device=device
+        )
 
         # 初始化參數
         self.ids = list(stock_ids)
@@ -75,8 +78,9 @@ class StockTradingEnv(gym.Env):
         self.QMAX = int(qmax_per_trade)
         self.fee_buy, self.fee_sell, self.tax_sell = float(fee_buy), float(fee_sell), float(tax_sell)
         self.lot_size = int(lot_size)
-        self.rng = np.random.default_rng(seed)
+        self.rng = torch.Generator(device=device).manual_seed(seed)  # torch 替代 np.random
         self.reward_mode = reward_mode
+        self.device = torch.device(device)
 
         # region 數據檢查
         df = df.copy().sort_values(["date", "stock_id"]).reset_index(drop=True)
@@ -99,18 +103,20 @@ class StockTradingEnv(gym.Env):
         # In order to catch the features except date and stock_id 
         self._feat_cols = [c for c in df.columns if c not in ["date", "stock_id"]]
 
-        # convert df's "open" and "close" into 2-dimensions matrix
+        # convert df's "open" and "close" into 2-dimensions tensors
         open_pv  = df.pivot(index="date", columns="stock_id", values="open").reindex(index=self.dates, columns=self.ids)
         close_pv = df.pivot(index="date", columns="stock_id", values="close").reindex(index=self.dates, columns=self.ids)
-        self.prices_open  = open_pv.to_numpy(dtype=np.float64)   # [T, N]
-        self.prices_close = close_pv.to_numpy(dtype=np.float64)  # [T, N]
+        self.prices_open  = torch.tensor(open_pv.to_numpy(dtype=np.float32), dtype=torch.float32, device=self.device)   # [T, N]
+        self.prices_close = torch.tensor(close_pv.to_numpy(dtype=np.float32), dtype=torch.float32, device=self.device)  # [T, N]
 
-        # 全特徵 3D -> numpy 
+
+        # 全特徵 3D -> torch tensor 
         feat_mats = []     #專門存放每個特徵轉換後的矩陣
         for c in self._feat_cols:
             pv = df.pivot(index="date", columns="stock_id", values=c).reindex(index=self.dates, columns=self.ids)
-            feat_mats.append(pv.to_numpy(dtype=np.float32)[..., None])   # [T, N, 1]
-        self.features = np.concatenate(feat_mats, axis=2) if feat_mats else np.zeros((self.T, self.N, 0))
+            arr = torch.tensor(pv.to_numpy(dtype=np.float32), dtype=torch.float32, device=self.device)[..., None]  # [T, N, 1]
+            feat_mats.append(arr)
+        self.features = torch.cat(feat_mats, dim=2) if feat_mats else torch.zeros((self.T, self.N, 0), device=self.device)
 
         # 狀態 (用來描述當前狀態的變數)
         self._t = None
@@ -120,27 +126,25 @@ class StockTradingEnv(gym.Env):
         self.avg_costs = None
         self.slots = None  # slot-based 持倉紀錄
 
-        # 定義環境的觀測空間
-        obs_dim = self.N * self.features.shape[2] * self.K + (1 + self.N) + 2 * self.max_holdings
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32)
-
-        # 定義動作空間
-        self.action_space = spaces.MultiDiscrete([3, self.N, self.QMAX + 1])
+        # === 不再定義 observation_space / action_space (移除 gym) ===
+        self.obs_dim = self.N * self.features.shape[2] * self.K + (1 + self.N) + 2 * self.max_holdings
+        self.action_dim = (3, self.N, self.QMAX + 1)  # MultiDiscrete 的結構 (直接用 tuple 儲存)
 
     # endregion 初始化部分
 
     # region 小工具部分
-    def _build_action_mask(self, t: int) -> np.ndarray:
+    def _build_action_mask(self, t: int) -> torch.Tensor:
         """
-        回傳形狀 (3, N, QMAX+1) 的布林遮罩
+        回傳形狀 (3, N, QMAX+1) 的布林遮罩 (torch.bool tensor)
         """
-        mask = np.zeros((3, self.N, self.QMAX + 1), dtype=bool)
+        mask = torch.zeros((3, self.N, self.QMAX + 1), dtype=torch.bool, device=self.device)
         if t + 1 >= self.T:
             mask[2, 0, 0] = True
             return mask
 
-        p_open = self.prices_open[t + 1]
-        baseline_mask = np.array([sid == "0050" for sid in self.ids])
+        p_open = self.prices_open[t + 1]  # [N]
+        baseline_mask = torch.tensor([sid == "0050" for sid in self.ids],
+                                    dtype=torch.bool, device=self.device)
 
         # BUY
         for i in range(self.N):
@@ -165,24 +169,34 @@ class StockTradingEnv(gym.Env):
         mask[2, 0, 0] = True
         return mask
 
-    def _mark_to_market(self, prices: np.ndarray) -> float:
-        return float((self.shares * prices).sum() + self.cash)
+    def _mark_to_market(self, prices: torch.Tensor) -> torch.Tensor:
+        return (self.shares * prices).sum() + self.cash
 
-    def _weights_vector(self, t: int) -> np.ndarray:
+    def _weights_vector(self, t: int) -> torch.Tensor:
+        """
+        輸出投資組合比例向量
+        EX:
+        現金    40%
+        台積電  30%
+        聯發科  20%
+        鴻海    10%
+        → 那麼 w = [0.4, 0.3, 0.2, 0.1]。
+        """
         prices = self.prices_close[t]
-        stock_val = float((self.shares * prices).sum())
-        V = stock_val + float(self.cash)
+        stock_val = (self.shares * prices).sum()
+        V = stock_val + self.cash
         if V <= 0:
-            w = np.zeros(self.N + 1, dtype=np.float64)
+            w = torch.zeros(self.N + 1, dtype=torch.float32, device=self.device)
             w[0] = 1.0
             return w
-        return np.concatenate([[self.cash / V], (self.shares * prices) / V])
+        return torch.cat([torch.tensor([self.cash / V], device=self.device),
+                        (self.shares * prices) / V])
 
-    def _features_window(self, t: int) -> np.ndarray:
-        win = self.features[t - self.K + 1 : t + 1]   # [K, N, F]
+    def _features_window(self, t: int) -> torch.Tensor:
+        win = self.features[t - self.K + 1: t + 1]   # [K, N, F]
         return win.reshape(-1)
-
-    def _slot_info(self, t: int) -> np.ndarray:
+    
+    def _slot_info(self, t: int) -> torch.Tensor:
         """輸出 slot-based 部位資訊 [avg_cost, floating_return] * max_holdings"""
         hold_info = []
         for s in range(self.max_holdings):
@@ -194,44 +208,49 @@ class StockTradingEnv(gym.Env):
                 price = self.prices_close[t, i]
                 floating_ret = (price - avg_cost) / avg_cost if avg_cost > 0 else 0.0
                 hold_info.extend([avg_cost, floating_ret])
-        return np.array(hold_info, dtype=np.float32)
+        return torch.tensor(hold_info, dtype=torch.float32, device=self.device)
 
-    def _make_obs(self, t: int) -> np.ndarray:
+    def _make_obs(self, t: int) -> torch.Tensor:
         feats = self._features_window(t)
         weights = self._weights_vector(t)
         slot_info = self._slot_info(t)
-        obs = np.concatenate([feats, weights, slot_info]).astype(np.float32)
+        obs = torch.cat([feats, weights, slot_info]).float()
         obs = (obs - obs.mean()) / (obs.std() + 1e-8)
-        return np.clip(obs, -1e6, 1e6)
+        return torch.clamp(obs, -1e6, 1e6)
     # endregion 小工具部分
 
     # region GymAPI
     def reset(self, *, seed=None, options=None):
-        super().reset(seed=seed)
         self._t = self.K
-        self.cash = float(self.initial_cash)
-        self.shares = np.zeros(self.N, dtype=np.int64)
-        self.avg_costs = np.zeros(self.N, dtype=np.float64)
+        self.cash = torch.tensor(float(self.initial_cash), dtype=torch.float32, device=self.device)
+        self.shares = torch.zeros(self.N, dtype=torch.float32, device=self.device)
+        self.avg_costs = torch.zeros(self.N, dtype=torch.float32, device=self.device)
         self.slots = [None] * self.max_holdings
-        self.portfolio_value = float(self.initial_cash)
+        self.portfolio_value = torch.tensor(float(self.initial_cash), dtype=torch.float32, device=self.device)
         self.trade_count = 0
 
-        obs = self._make_obs(self._t)
-        action_mask_3d = self._build_action_mask(self._t)
+        obs = self._make_obs(self._t)                       # torch.Tensor
+        action_mask_3d = self._build_action_mask(self._t)   # torch.BoolTensor
 
-        info = {"V": int(self.portfolio_value), "action_mask_3d": action_mask_3d}
+        info = {
+            "V": self.portfolio_value.item(),   # 轉成 python int，方便 log
+            "action_mask_3d": action_mask_3d    # 保留 torch tensor，PPO 可以直接用
+        }
         return obs, info
 
     def step(self, action):
         if self._t + 1 >= self.T:
             obs_now = self._make_obs(self._t)
-            info_end = {"msg": "no next day", "V": int(self.portfolio_value),
-                        "action_mask_3d": self._build_action_mask(self._t)}
-            return obs_now, 0.0, True, False, info_end
+            info_end = {"msg": "no next day", 
+                        "V": int(self.portfolio_value),
+                        "action_mask_3d": self._build_action_mask(self._t),
+            }
+            return obs_now, torch.tensor(0.0, device=self.device), True, False, info_end
 
         t = self._t
         p_open  = self.prices_open[t + 1]   # t+1 開盤成交
         p_close = self.prices_close[t + 1]  # t+1 收盤估值
+
         op, idx, q = int(action[0]), int(action[1]), int(action[2])
         side, exec_shares, gross_cash, fees_tax = "HOLD", 0, 0, 0
         mask = self._build_action_mask(t)
@@ -289,15 +308,17 @@ class StockTradingEnv(gym.Env):
         V_prev = float(self.portfolio_value)
         V_new  = float(self._mark_to_market(p_close))
         self.portfolio_value = V_new
-        portfolio_return = float(np.log(max(V_new, 1e-12) / max(V_prev, 1e-12)))
-        baseline_return  = float(np.log(max(self.baseline_close[t + 1], 1e-12) /
-                                        max(self.baseline_close[t], 1e-12)))
+        portfolio_return = torch.log(torch.clamp(V_new, min=1e-12) / torch.clamp(V_prev, min=1e-12))
+        baseline_return  = torch.log(
+            torch.tensor(self.baseline_close[t + 1], device=self.device) /
+            torch.tensor(self.baseline_close[t], device=self.device)
+        )
         reward = portfolio_return - baseline_return
         if side in ("BUY", "SELL_ALL"):
             reward -= 0.00005
 
         # === 個股懲罰 (slot-based) ===
-        penalty = 0.0
+        penalty = torch.tensor(0.0, device=self.device)
         for s, i in enumerate(self.slots):
             if i is not None and self.avg_costs[i] > 0:
                 cur_price = self.prices_close[self._t, i]
@@ -306,7 +327,7 @@ class StockTradingEnv(gym.Env):
                     # 線性懲罰
                     # penalty += abs(floating_ret) * 0.05   # α=0.05，可調
                     # 指數型懲罰
-                    penalty += (np.exp(-5 * floating_ret) - 1)*0.001
+                    penalty += (torch.exp(-5 * floating_ret) - 1)*0.001
         reward -= penalty
 
         self._t += 1
@@ -314,23 +335,23 @@ class StockTradingEnv(gym.Env):
         obs = self._make_obs(self._t)
         next_mask = self._build_action_mask(self._t)
 
-        # holdings_detail
+        # holdings_detail (輸出時轉回 python type)
         holdings_detail = {
             s: {
                 "stock_id": self.ids[i] if i is not None else None,
-                "shares": int(self.shares[i]) if i is not None else 0,
-                "avg_cost": float(self.avg_costs[i]) if i is not None else 0.0,
-                "cur_price": float(self.prices_close[self._t, i]) if i is not None else 0.0,
+                "shares": int(self.shares[i].item()) if i is not None else 0,
+                "avg_cost": float(self.avg_costs[i].item()) if i is not None else 0.0,
+                "cur_price": float(self.prices_close[self._t, i].item()) if i is not None else 0.0,
                 "floating_ret": (
-                    (self.prices_close[self._t, i] - self.avg_costs[i]) / self.avg_costs[i]
+                    float((self.prices_close[self._t, i] - self.avg_costs[i]) / self.avg_costs[i])
                     if (i is not None and self.avg_costs[i] > 0) else 0.0
-                )
+                ),
             }
             for s, i in enumerate(self.slots)
         }
 
         info = {
-            "V": int(self.portfolio_value),
+            "V": int(self.portfolio_value.item()),
             "date": str(pd.Timestamp(self.dates[self._t]).date()),
             "side": side,
             "stock_id": (self.ids[idx] if 0 <= idx < self.N else None),
@@ -338,13 +359,13 @@ class StockTradingEnv(gym.Env):
             "exec_shares": int(exec_shares),
             "gross_cash": int(gross_cash),
             "fees_tax": int(fees_tax),
-            "cash": int(round(self.cash)),
-            "held": int((self.shares > 0).sum()),
+            "cash": int(round(self.cash.item())),
+            "held": int((self.shares > 0).sum().item()),
             "action_mask_3d": next_mask,
-            "baseline_return": baseline_return,
+            "baseline_return": float(baseline_return.item()),
             "trade_count": self.trade_count,
             "slots_mapping": {s: (self.ids[i] if i is not None else None) for s, i in enumerate(self.slots)},
-            "holdings_detail": holdings_detail,   
+            "holdings_detail": holdings_detail,
         }
 
         return obs, reward, terminated, False, info
