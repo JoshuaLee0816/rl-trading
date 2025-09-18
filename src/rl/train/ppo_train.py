@@ -239,7 +239,7 @@ if __name__ == "__main__":
         obs_dim=obs_dim,
         num_stocks=num_stocks,
         qmax_per_trade=qmax_per_trade,
-        config=ppo_cfg,
+        config=config,
     )
 
     # === Logging ===
