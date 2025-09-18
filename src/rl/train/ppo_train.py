@@ -57,7 +57,6 @@ def normalize_mask_batch(mask_any):
 def _infer_spaces_and_dims(env):
     os_ = getattr(env, "single_observation_space", env.observation_space)
     as_ = getattr(env, "single_action_space", env.action_space)
-
     obs_dim = int(np.prod(os_.shape))
     if isinstance(as_, gym.spaces.MultiDiscrete):
         action_dim = int(np.prod(as_.nvec))
@@ -107,16 +106,11 @@ def run_eval_and_plot(
     recent_curves,
     upload_wandb: bool
 ):
-    # === 呼叫測試 ===
     total_ret, max_dd, df_perf, df_baseline = run_test_once(
         ckpt_path, data_path_test, config_path,
         plot=False, save_trades=False, tag=f"ep{ep}", verbose=False
     )
-
-    # 更新最近曲線
     recent_curves.append((ep, df_perf))
-
-    # 畫比較圖（與原本相同）
     plt.figure(figsize=(10, 6))
     for ep_id, df_c in recent_curves:
         plt.plot(df_c.index, df_c["value"], label=f"ep{ep_id}")
@@ -133,7 +127,6 @@ def run_eval_and_plot(
             "test/portfolio_curves": wandb.Image(plt)
         }, step=ep)
     plt.close()
-
     return total_ret, max_dd, df_perf, df_baseline
 # endregion 小工具部分
 
@@ -146,27 +139,22 @@ if __name__ == "__main__":
     with open(ROOT / "config.yaml", "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
     
-    # === 取出各區塊的別名 ===
     train_cfg = config["training"]
     env_cfg   = config["environment"]
     log_cfg   = config["logging"]
     data_cfg  = config["data"]
     ppo_cfg   = config.get("ppo", {}) 
 
-    # ---- 訓練設定 ----
     n_episodes   = train_cfg["n_episodes"]
     save_freq    = train_cfg["save_freq"]
     upload_wandb = train_cfg["upload_wandb"]
-
-    ckpt_freq = train_cfg["ckpt_freq"]      
-    max_ckpts = train_cfg["max_ckpts"]
+    ckpt_freq    = train_cfg["ckpt_freq"]      
+    max_ckpts    = train_cfg["max_ckpts"]
 
     num_envs    = ppo_cfg.get("num_envs")
     use_subproc = ppo_cfg.get("use_subproc")
+    wandb_every = log_cfg.get("wandb_every")
 
-    wandb_every       = log_cfg.get("wandb_every")
-
-    # ---- 環境設定 ----
     init_cash      = env_cfg["initial_cash"]
     lookback       = env_cfg["lookback"]
     reward_mode    = str(env_cfg["reward_mode"]).lower().strip()
@@ -174,10 +162,8 @@ if __name__ == "__main__":
     max_holdings   = env_cfg.get("max_holdings")
     qmax_per_trade = int(env_cfg.get("qmax_per_trade"))
 
-    # ---- 近期曲線容器 ----
     recent_curves = deque(maxlen=max_ckpts)
 
-    # ---- 初始化 W&B ----
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     if upload_wandb:
         wandb.init(
@@ -188,11 +174,9 @@ if __name__ == "__main__":
             config=ppo_cfg
         )
 
-    # ---- 輸出目錄 ----
     outdir = ROOT / config["logging"]["outdir"]
     run_dir = outdir / f"run_{run_id}"
     run_dir.mkdir(parents=True, exist_ok=True)
-
     with open(run_dir / "config.yaml", "w", encoding="utf-8") as f:
         yaml.dump(config, f)
 
@@ -203,12 +187,10 @@ if __name__ == "__main__":
         df = pd.read_parquet(data_path)
     else:
         df = pd.read_csv(data_path, parse_dates=["date"])
-
     selected_feats = config["data"].get("features", None)
     if selected_feats is not None:
         keep_cols = ["date", "stock_id"] + selected_feats
         df = df[[c for c in keep_cols if c in df.columns]]
-
     ids = sorted(df["stock_id"].unique())
     num_stocks = len(ids)
 
@@ -224,41 +206,38 @@ if __name__ == "__main__":
             max_holdings=max_holdings,
             qmax_per_trade=qmax_per_trade,
         )
-
     if use_subproc:
         env = AsyncVectorEnv([make_env for _ in range(num_envs)])
     else:
         env = SyncVectorEnv([make_env for _ in range(num_envs)])
-
-    n_envs = getattr(env, "num_envs", num_envs)  # 統一使用的環境數
+    n_envs = getattr(env, "num_envs", num_envs)
 
     # === 初始化 agent ===
     _, _, obs_dim, _ = _infer_spaces_and_dims(env)
-
     agent = PPOAgent(
-        obs_dim=None,                       # 這個參數之後在 PPOAgent.__init__ 會忽略
+        obs_dim=None,
         num_stocks=num_stocks,
         qmax_per_trade=qmax_per_trade,
         config=config,
     )
 
-    # === Logging ===
+    # === 一次性的 Debug Print ===
+    print("=== [DEBUG TRAIN LOOP INIT] ===")
+    print(f"n_envs={n_envs}, n_steps={agent.n_steps}, batch_size={agent.batch_size}, epochs={agent.epochs}")
+    print(f"Stocks={num_stocks}, Lookback={lookback}, Features={len(selected_feats)}")
+    print(f"Max_holdings={max_holdings}, QMAX={qmax_per_trade}")
+
     all_rewards, summary = [], []
     trade_sample_freq = config["logging"].get("trade_sample_freq", 10)
     logger = RunLogger(run_dir, trade_sample_freq)
-
     progress_bar = trange(1, n_episodes + 1, desc="Training", unit="episode")
 
-    # === PPO 訓練 ===
     try:
         for ep in progress_bar:
             obs, infos = env.reset()
             daily_returns = []
             ep_trade_counts = [0 for _ in range(num_envs)]
-
             action_mask_batch = normalize_mask_batch(infos.get("action_mask_3d", None))
-            t_env_total, t_train_total, update_count = 0.0, 0.0, 0
-
             for t in range(agent.n_steps):
                 batch_actions, batch_actions_flat, batch_logps, batch_values, batch_masks_flat = [], [], [], [], []
                 for i in range(n_envs):
@@ -271,19 +250,16 @@ if __name__ == "__main__":
                         mask_flat_i = mask_flat_i.astype(bool, copy=False)
                     else:
                         mask_flat_i = None
-
                     action_tuple_i, action_flat_i, logp_i, value_i, obs_flat_i, mask_flat_i = agent.select_action(obs_i, action_mask_3d=mask_i)
                     batch_actions.append(np.asarray(action_tuple_i, dtype=np.int64))
                     batch_actions_flat.append(int(action_flat_i))
                     batch_logps.append(float(logp_i))
                     batch_values.append(float(value_i))
                     batch_masks_flat.append(mask_flat_i)
-
                 actions = np.stack(batch_actions, axis=0).astype(np.int64)
                 next_obs, rewards, dones, truncs, infos = env.step(actions)
                 action_mask_batch = normalize_mask_batch(infos.get("action_mask_3d", None))
                 infos_list = split_infos(infos)
-
                 for i in range(len(infos_list)):
                     agent.store_transition(
                         obs_flat_i,
@@ -297,27 +273,20 @@ if __name__ == "__main__":
                     logger.log_step(ep, infos_list[i])
                     if "trade_count" in infos_list[i]:
                         ep_trade_counts[i] = infos_list[i]["trade_count"]
-
                 obs = next_obs
                 daily_returns.extend(rewards.tolist())
-
             agent.update()
-
             if len(agent.entropy_log) > 0:
                 episode_entropy.append(agent.entropy_log[-1])
-
             m = compute_episode_metrics(daily_returns)
             ep_return = m["annualized_pct"]
             all_rewards.append(ep_return)
             avg_trades = float(np.mean(ep_trade_counts))
-
             summary.append({
                 "episode": ep,
                 "annualized_return_pct": ep_return,
                 "avg_trade_count": avg_trades,
             })
-
-            # === W&B logging (Train) ===
             if upload_wandb and (ep % wandb_every) == 0:
                 wandb.log({
                     "train/episode": ep,
@@ -327,36 +296,26 @@ if __name__ == "__main__":
                     "train/critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
                     "train/entropy": episode_entropy[-1] if episode_entropy else None,
                 }, step=ep)
-
-            # === 定期存 checkpoint & 測試 ===
             if ep % ckpt_freq == 0:
                 ckpt_path = save_checkpoint(run_dir, agent, ep)
                 prune_checkpoints(run_dir, max_ckpts)
-
                 data_path_test = ROOT / "data" / "processed" / "full" / "walk_forward" / "WF_test_2020_full.parquet"
                 config_path    = ROOT / "config.yaml"
-
                 total_ret, max_dd, df_perf, df_baseline = run_eval_and_plot(
                     ckpt_path, config_path, data_path_test, ep, recent_curves, upload_wandb
                 )
-
     finally:
         try:
             env.close()
         except Exception:
             pass
 
-    # === 儲存最後模型 ===
     torch.save(agent.actor.state_dict(), run_dir / "ppo_actor.pt")
     torch.save(agent.critic.state_dict(), run_dir / "ppo_critic.pt")
-
     if upload_wandb:
         wandb.save(str(run_dir / "ppo_actor.pt"))
         wandb.save(str(run_dir / "ppo_critic.pt"))
-
     if config["logging"]["save_summary"]:
         pd.DataFrame(summary).to_csv(run_dir / "summary.csv", index=False)
-
     print(f"✅ Training finished. Model=PPO. Results saved in: {run_dir}")
-
 # endregion 主程式
