@@ -6,6 +6,7 @@ import numpy as np
 import platform
 import wandb
 from torch.distributions import Categorical
+from rl.models.encoders import build_encoder
 
 LARGE_NEG = -1e9
 
@@ -145,6 +146,22 @@ class PPOAgent:
 
         # endregion 選擇device
 
+        # --- Encoder 初始化 ---
+        features = config["data"].get("features_clean", config["data"].get("features", []))
+        self.F = len(features)
+        enc_cfg = config["model"].get("encoder", {"type":"identity"})
+        self.encoder = build_encoder(enc_cfg, F=self.F)
+
+        # 每檔股票輸出的維度
+        if enc_cfg["type"] == "identity":
+            per_stock_dim = self.F * enc_cfg["params"].get("k_window", 20)
+        else:
+            per_stock_dim = enc_cfg["params"].get("d_model", 48)
+
+        # 總 obs 維度 = 股票編碼 + portfolio 狀態 + anchor
+        anchors = int(config["model"].get("n_anchor", 0))
+        self.obs_dim = self.N * per_stock_dim + (1 + self.N) + anchors
+
         # Actor Critic Optimizer初始化
         self.actor  = Actor(self.obs_dim, self.N, self.QMAX, hidden_dim=config.get("actor_hidden")).to(self.device)
         self.critic = Critic(self.obs_dim, hidden_dim=config.get("critic_hidden")).to(self.device)
@@ -225,8 +242,22 @@ class PPOAgent:
         # 在 rollout 階段關閉梯度，避免建立無用計算圖（省記憶體、加速）
         with torch.no_grad():
             # 1) to tensor & normalized
+            # 假設 obs 是 dict: {"features": (N,F,K), "portfolio": (1+N,), "anchors": (n_anchor,)}
+            features_raw = torch.as_tensor(obs["features"], dtype=torch.float32, device=self.device).unsqueeze(0)  # (1,N,F,K)
+            z = self.encoder(features_raw)      # (1,N,D) or (1,N,F*K)
+            z_flat = z.reshape(1, -1)           # (1, N*D)
+
+            portfolio = torch.as_tensor(obs["portfolio"], dtype=torch.float32, device=self.device).unsqueeze(0)  # (1,1+N)
+            anchors = torch.as_tensor(obs.get("anchors", []), dtype=torch.float32, device=self.device).unsqueeze(0)  # (1,n_anchor)
+
+            obs_t = torch.cat([z_flat, portfolio, anchors], dim=1)  # (1, obs_dim)
+            obs_t = (obs_t - obs_t.mean()) / (obs_t.std() + 1e-8)
+
+            """
             obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)  # obs 轉成tensor shape = (1, obs_dim)
             obs_t = (obs_t - obs_t.mean()) / (obs_t.std() + 1e-8)                               # 送進網路錢先進行標準化obs
+            """
+
             mask_flat = self.flatten_mask(action_mask_3d).unsqueeze(0)                          # 只允許True in Mask
 
             # 2) logits -> masked categorical
@@ -246,6 +277,12 @@ class PPOAgent:
             a_flat_int = int(a_flat.item())
             action_tuple = self.flat_to_tuple(a_flat_int)
 
+            # === 展平 obs 存 buffer ===
+            obs_flat_np = obs_t.squeeze(0).cpu().numpy()   # (obs_dim,)
+            self.store_transition(obs_flat_np, a_flat_int, reward=0.0, done=False,
+                                log_prob=float(logp.item()), value=float(value.item()),
+                                action_mask_flat=mask_flat.squeeze(0).cpu().numpy())
+            
         return (
             action_tuple,       #給env.step()
             a_flat_int,         #給buffer 儲存
