@@ -1,6 +1,6 @@
 import torch, time
 
-# === 模擬你的專案維度 ===
+# === 模擬專案維度 ===
 N, F, K = 300, 11, 15
 L = N * K   # sequence length
 d = 64      # embedding dim
