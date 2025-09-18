@@ -13,6 +13,17 @@ training:
   grad_steps: 1             # 每次觸發連續更新幾次（未用）
   load_checkpoint: false    # 是否從檢查點載入（未用）
 
+model:
+  encoder:
+    type: "identity"        # "identity"(不做變化) | "temporal_transformer"(啟用transformer self-attention) Actor /Critic 前state要不要經過一個encoder
+    params:
+      d_model: 48           # Transformer 隱藏維度(每檔最後輸出的向量長度)
+      n_heads: 2            # 分成幾個head關注
+      n_layers: 1           # Transformer Encoder 疊幾層 => 每層 = self-attention + FFN + 殘差
+      dropout: 0.1          # 每層的dropout rate
+      k_window: 15          # 要和Training pipeline對齊?
+  n_anchor: 0               # 直通特徵的維度數，不經過transformer的部分
+
 data:
   # file: "stocks_20_with_market_index_2015-2020_long.parquet"
   file: "full_300/walk_forward/WF_train_2015_2019_full_300.parquet"  # 資料檔路徑
