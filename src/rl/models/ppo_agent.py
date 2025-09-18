@@ -1,4 +1,3 @@
-# src/rl/models/ppo_agent.py
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -31,7 +30,11 @@ class Actor(nn.Module):
                 nn.init.zeros_(layer.bias)
 
     def forward(self, x):  # x: (B, obs_dim)
-        return self.net(x)  # (B, A)
+        out = self.net(x)  # (B, A)
+        if not hasattr(self, "_printed"):
+            print(f"[DEBUG] Actor.forward | input={x.shape} → logits={out.shape}")
+            self._printed = True
+        return out
 
 
 class Critic(nn.Module):
@@ -43,7 +46,11 @@ class Critic(nn.Module):
             nn.Linear(hidden_dim, 1)
         )
     def forward(self, x):  # x: (B, obs_dim)
-        return self.net(x).squeeze(-1)  # (B,)
+        out = self.net(x).squeeze(-1)  # (B,)
+        if not hasattr(self, "_printed"):
+            print(f"[DEBUG] Critic.forward | input={x.shape} → value={out.shape}")
+            self._printed = True
+        return out
 
 # endregion Actor/Critic Network
 

@@ -235,21 +235,22 @@ if __name__ == "__main__":
     try:
         for ep in progress_bar:
             obs, infos = env.reset()
+            if ep == 1:
+                print("=== [DEBUG EPISODE START] ===")
+                print(f"obs (reset): type={type(obs)}, len={len(obs) if hasattr(obs,'__len__') else 'N/A'}")
+
             daily_returns = []
             ep_trade_counts = [0 for _ in range(num_envs)]
             action_mask_batch = normalize_mask_batch(infos.get("action_mask_3d", None))
             for t in range(agent.n_steps):
+                if ep == 1 and t == 0:
+                    print("=== [DEBUG STEP] ===")
+                    print(f"step={t}, action_mask_batch={action_mask_batch.shape if action_mask_batch is not None else None}")
+
                 batch_actions, batch_actions_flat, batch_logps, batch_values, batch_masks_flat = [], [], [], [], []
                 for i in range(n_envs):
                     obs_i = obs[i]
                     mask_i = action_mask_batch[i] if action_mask_batch is not None else None
-                    if mask_i is not None:
-                        mask_flat_i = agent.flatten_mask(mask_i)
-                        if hasattr(mask_flat_i, "detach"):
-                            mask_flat_i = mask_flat_i.detach().to("cpu").numpy()
-                        mask_flat_i = mask_flat_i.astype(bool, copy=False)
-                    else:
-                        mask_flat_i = None
                     action_tuple_i, action_flat_i, logp_i, value_i, obs_flat_i, mask_flat_i = agent.select_action(obs_i, action_mask_3d=mask_i)
                     batch_actions.append(np.asarray(action_tuple_i, dtype=np.int64))
                     batch_actions_flat.append(int(action_flat_i))
@@ -258,6 +259,11 @@ if __name__ == "__main__":
                     batch_masks_flat.append(mask_flat_i)
                 actions = np.stack(batch_actions, axis=0).astype(np.int64)
                 next_obs, rewards, dones, truncs, infos = env.step(actions)
+
+                if ep == 1 and t == 0:
+                    print("=== [DEBUG ENV STEP RESULT] ===")
+                    print(f"actions={actions.shape}, rewards={rewards.shape}, dones={dones.shape}")
+
                 action_mask_batch = normalize_mask_batch(infos.get("action_mask_3d", None))
                 infos_list = split_infos(infos)
                 for i in range(len(infos_list)):
