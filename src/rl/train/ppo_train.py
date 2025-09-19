@@ -254,7 +254,11 @@ if __name__ == "__main__":
 
             daily_returns = []
             ep_trade_counts = [0 for _ in range(num_envs)]
-            action_mask_batch = normalize_mask_batch(infos.get("action_mask_3d", None))
+
+            # infos 是 list of dicts
+            action_masks = [i.get("action_mask_3d", None) for i in infos]
+            action_mask_batch = normalize_mask_batch(action_masks)
+
             for t in range(agent.n_steps):
                 if ep == 1 and t == 0:
                     print("=== [DEBUG STEP] ===")
@@ -272,7 +276,7 @@ if __name__ == "__main__":
                     batch_masks_flat.append(mask_flat_i)
 
                 actions = torch.stack(batch_actions, dim=0)
-                next_obs, rewards, dones, truncs, infos = envs.step(actions)
+                next_obs, rewards, dones, truncs, infos = step_envs(envs, actions)
 
                 if ep == 1 and t == 0:
                     print("=== [DEBUG ENV STEP RESULT] ===")
