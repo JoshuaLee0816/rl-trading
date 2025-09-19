@@ -30,6 +30,19 @@ from rl.test.ppo_test import run_test_once   # ✅ 引用測試 function
 
 # region 小工具部分
 
+def reset_envs(envs):
+    obs_list, infos_list = [], []
+    for e in envs:
+        o, i = e.reset()
+        obs_list.append(o)
+        infos_list.append(i)
+    return obs_list, infos_list
+
+def step_envs(envs, actions):
+    results = [e.step(a) for e, a in zip(envs, actions)]
+    next_obs, rewards, dones, truncs, infos = zip(*results)
+    return list(next_obs), list(rewards), list(dones), list(truncs), list(infos)
+
 def split_infos(infos):
     if isinstance(infos, dict) and isinstance(list(infos.values())[0], (np.ndarray, list)):
         num_envs = len(next(iter(infos.values())))
@@ -221,7 +234,20 @@ if __name__ == "__main__":
 
     try:
         for ep in progress_bar:
-            obs, infos = envs.reset()
+
+            # 等同之前的gym .reset()
+            obs, infos = reset_envs(envs)
+
+            for t in range(agent.n_steps):
+                actions = []
+                for i in range(len(envs)):
+                    action_tuple, action_flat, logp, value, obs_flat, mask_flat = agent.select_action(
+                        obs[i], infos[i].get("action_mask_3d", None)
+                    )
+                    actions.append(action_tuple)
+
+                obs, rewards, dones, truncs, infos = step_envs(envs, actions)
+
             if ep == 1:
                 print("=== [DEBUG EPISODE START] ===")
                 print(f"obs (reset): type={type(obs)}, len={len(obs) if hasattr(obs,'__len__') else 'N/A'}")
