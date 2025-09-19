@@ -41,7 +41,15 @@ def reset_envs(envs):
 def step_envs(envs, actions):
     results = [e.step(a) for e, a in zip(envs, actions)]
     next_obs, rewards, dones, truncs, infos = zip(*results)
-    return list(next_obs), list(rewards), list(dones), list(truncs), list(infos)
+
+    # 轉成 list -> tensor (保持和舊 vector env 相同介面)
+    next_obs = torch.stack(next_obs)          # [n_envs, obs_dim]
+    rewards  = torch.stack(rewards)           # [n_envs]
+    dones    = torch.tensor(dones)            # [n_envs]
+    truncs   = torch.tensor(truncs)           # [n_envs]
+
+    return next_obs, rewards, dones, truncs, list(infos)
+
 
 def split_infos(infos):
     if isinstance(infos, dict) and isinstance(list(infos.values())[0], (np.ndarray, list)):
