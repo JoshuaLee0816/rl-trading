@@ -51,20 +51,6 @@ def normalize_mask_batch(mask_any):
         return mask_any.to(dtype=torch.bool)
     return torch.stack([torch.as_tensor(m, dtype=torch.bool) for m in mask_any])
 
-def _infer_spaces_and_dims(env):
-    os_ = getattr(env, "single_observation_space", env.observation_space)
-    as_ = getattr(env, "single_action_space", env.action_space)
-    obs_dim = int(np.prod(os_.shape))
-    if isinstance(as_, gym.spaces.MultiDiscrete):
-        action_dim = int(np.prod(as_.nvec))
-    elif isinstance(as_, gym.spaces.Discrete):
-        action_dim = int(as_.n)
-    elif isinstance(as_, gym.spaces.Box):
-        action_dim = int(np.prod(as_.shape))
-    else:
-        raise ValueError(f"Unsupported action_space: {type(as_)} | {as_!r}")
-    return os_, as_, obs_dim, action_dim
-
 def save_checkpoint(run_dir: Path, agent, ep: int) -> Path:
     ckpt_path = run_dir / f"checkpoint_ep{ep}.pt"
     torch.save({
@@ -212,7 +198,9 @@ if __name__ == "__main__":
     n_envs = len(envs)
 
     # === 初始化 agent ===
-    _, _, obs_dim, _ = _infer_spaces_and_dims(envs)
+    obs_dim = envs[0].obs_dim
+    action_dim = envs[0].action_dim
+
     agent = PPOAgent(
         obs_dim=None,
         num_stocks=num_stocks,
