@@ -56,25 +56,28 @@ class Critic(nn.Module):
 
 
 class RolloutBuffer:
-    def __init__(self):
+    def __init__(self, device):
+        self.device = device
         self.clear()
-    def add(self, obs, action_flat, reward, done, log_prob, value, action_mask_flat):
-        self.obs.append(obs)
-        self.actions.append(action_flat)
-        self.rewards.append(reward)
-        self.dones.append(done)
-        self.log_probs.append(log_prob)
-        self.values.append(value)
-        self.masks.append(action_mask_flat)
+
+    def add(self, obs, action_flat, reward, done, log_prob, value, action_mask_flat):               #存成tensor
+        self.obs.append(obs.to(self.device))
+        self.actions.append(torch.as_tensor(action_flat, device=self.device))
+        self.rewards.append(torch.as_tensor(reward, device=self.device))
+        self.dones.append(torch.as_tensor(done, device=self.device))
+        self.log_probs.append(torch.as_tensor(log_prob, device=self.device))
+        self.values.append(torch.as_tensor(value, device=self.device))
+        self.masks.append(action_mask_flat.to(self.device))
+
     def get(self):
-        return (
-            np.array(self.obs, dtype=np.float32),
-            np.array(self.actions, dtype=np.int64),
-            np.array(self.rewards, dtype=np.float32),
-            np.array(self.dones, dtype=np.float32),
-            np.array(self.log_probs, dtype=np.float32),
-            np.array(self.values, dtype=np.float32),
-            np.array(self.masks, dtype=np.bool_)
+        return (        #return torch datatype
+            torch.stack(self.obs),
+            torch.stack(self.actions),
+            torch.stack(self.rewards),
+            torch.stack(self.dones),
+            torch.stack(self.log_probs),
+            torch.stack(self.values),
+            torch.stack(self.masks),
         )
     def clear(self):
         self.obs, self.actions, self.rewards = [], [], []
@@ -146,7 +149,7 @@ class PPOAgent:
         self.actor_optimizer  = optim.Adam(self.actor.parameters(), lr=self.actor_lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_lr)
 
-        self.buffer = RolloutBuffer()
+        self.buffer = RolloutBuffer(self.device)
 
         # === Debug print (only once) ===
         if not hasattr(PPOAgent, "_printed_init"):
@@ -216,15 +219,18 @@ class PPOAgent:
                 print("action:", a_flat_int, "tuple:", action_tuple)
                 self._printed_select = True
 
-        return action_tuple, a_flat_int, float(logp.item()), float(value.item()), obs_flat_np, mask_flat_np
+        return action_tuple, a_flat_int, float(logp.item()), float(value.item()), obs_t.squeeze(0), mask_flat.squeeze(0)
     # endregion
 
     def store_transition(self, obs, action_flat, reward, done, log_prob, value, action_mask_flat):
         self.buffer.add(obs, action_flat, reward, done, log_prob, value, action_mask_flat)
 
+    # region Update
     def update(self):
         obs, actions, rewards, dones, old_log_probs, values, masks = self.buffer.get()
         self.buffer.clear()
+        """
+        前面已經轉過了
         device = self.device
         obs    = torch.tensor(obs,    dtype=torch.float32, device=device)  
         acts   = torch.tensor(actions, dtype=torch.long,   device=device) 
@@ -233,8 +239,8 @@ class PPOAgent:
         old_lp = torch.tensor(old_log_probs, dtype=torch.float32, device=device)  
         vals   = torch.tensor(values,  dtype=torch.float32, device=device)        
         masks  = torch.tensor(masks,   dtype=torch.bool,   device=device)        
-
-        returns, advantages_raw = self._compute_gae(rews, dns, vals)
+        """
+        returns, advantages_raw = self._compute_gae(rewards, dones, values)
         advantages = (advantages_raw - advantages_raw.mean()) / (advantages_raw.std() + 1e-8)
 
         if wandb.run is not None:
@@ -248,7 +254,13 @@ class PPOAgent:
             np.random.shuffle(idxs)
             for start in range(0, N, self.batch_size):
                 b = idxs[start:start+self.batch_size]
-                b_obs, b_acts, b_rets, b_advs, b_oldlp, b_mask = obs[b], acts[b], returns[b], advantages[b], old_lp[b], masks[b]
+                b_obs   = obs[b]
+                b_acts  = actions[b]
+                b_rets  = returns[b]
+                b_advs  = advantages[b]
+                b_oldlp = old_log_probs[b]
+                b_mask  = masks[b]
+                
                 logits = self.actor(b_obs)
                 masked_logits = logits.masked_fill(~b_mask, LARGE_NEG)
                 dist = Categorical(logits=masked_logits)
@@ -278,22 +290,27 @@ class PPOAgent:
         if not hasattr(self, "_printed_update"):
             print("=== [DEBUG UPDATE] ===")
             print("obs:", obs.shape)
-            print("actions:", acts.shape)
+            print("actions:", actions.shape)
             print("advantages:", advantages.shape)
             print("returns:", returns.shape)
             self._printed_update = True
 
+    # endregion Update
+
+    # region Compute_GAE
     def _compute_gae(self, rewards, dones, values):
-        returns, advs = [], []
+        T = len(rewards)
+
+        returns = torch.zeros(T, dtype=torch.float32, device=self.device)
+        advs    = torch.zeros(T, dtype=torch.float32, device=self.device)
+
         gae, next_value = 0.0, 0.0
-        for t in reversed(range(len(rewards))):
+        for t in reversed(range(T)):
             delta = rewards[t] + self.gamma * next_value * (1 - dones[t]) - values[t]
-            gae = delta + self.gamma * self.lam * (1 - dones[t]) * gae
-            advs.insert(0, gae)
-            returns.insert(0, gae + values[t])
+            gae   = delta + self.gamma * self.lam * (1 - dones[t]) * gae
+            advs[t]    = gae
+            returns[t] = gae + values[t]
             next_value = values[t]
-        device = self.device
-        return (
-            torch.tensor(returns, dtype=torch.float32, device=device),
-            torch.tensor(advs,    dtype=torch.float32, device=device),
-        )
+        return returns, advs
+    
+    # endregion Compute_GAE
