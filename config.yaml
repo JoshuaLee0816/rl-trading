@@ -17,7 +17,7 @@ model:
   encoder:
     type: "temporal_transformer"        # "identity"(不做變化) | "temporal_transformer"(啟用transformer self-attention) Actor /Critic 前state要不要經過一個encoder
     params:
-      d_model: 16           # Transformer 隱藏維度(每檔最後輸出的向量長度)
+      d_model: 2           # Transformer 隱藏維度(每檔最後輸出的向量長度)
       n_heads: 2            # 分成幾個head關注
       n_layers: 1           # Transformer Encoder 疊幾層 => 每層 = self-attention + FFN + 殘差
       dropout: 0.1          # 每層的dropout rate
@@ -70,8 +70,8 @@ ppo:
   epochs: 1                 # 每次 update 的 epoch 數
 
   # 網路結構
-  actor_hidden: 32
-  critic_hidden: 32
+  actor_hidden: 8
+  critic_hidden: 8
 
 dqn:                         # 目前未用（model=ppo 時忽略）
   gamma: 0.99
