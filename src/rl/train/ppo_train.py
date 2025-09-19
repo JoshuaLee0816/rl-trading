@@ -249,27 +249,38 @@ if __name__ == "__main__":
     all_rewards, summary = [], []
     trade_sample_freq = config["logging"].get("trade_sample_freq", 10)
     logger = RunLogger(run_dir, trade_sample_freq)
-    progress_bar = trange(1, n_episodes + 1, desc="Training", unit="episode")
+    progress_bar = trange(1, n_episodes * n_envs + 1, unit="episode")
 
     try:
         for ep in progress_bar:
-
             # 等同之前的gym .reset()
             obs, infos = reset_envs(envs, agent)
 
             for t in range(agent.n_steps):
-                actions = []
-                for i in range(len(envs)):
-                    action_tuple, action_flat, logp, value, obs_flat, mask_flat = agent.select_action(
-                        obs[i], infos[i].get("action_mask_3d", None)
+                # === 批次 action ===
+                mask_batch = [i.get("action_mask_3d", None) for i in infos]
+                actions_tuple, actions_flat, logps, values, obs_batch, mask_batch = agent.select_action(obs, mask_batch)
+
+                # === 執行環境 step ===
+                obs, rewards, dones, truncs, infos = step_envs(envs, actions_tuple, agent)
+
+                if ep == 1 and t == 0:
+                    print("=== [DEBUG ENV STEP RESULT] ===")
+                    print(f"actions={len(actions_tuple)}, rewards={rewards.shape}, dones={dones.shape}")
+
+                # === 存 buffer ===
+                infos_list = split_infos(infos)
+                for i in range(len(infos_list)):
+                    agent.store_transition(
+                        obs_batch[i],          # [obs_dim]
+                        actions_flat[i],       # 單個動作 index
+                        rewards[i],
+                        dones[i],
+                        logps[i],
+                        values[i],
+                        mask_batch[i],
                     )
-                    actions.append(action_tuple)
-
-                obs, rewards, dones, truncs, infos = step_envs(envs, actions, agent)
-
-            if ep == 1:
-                print("=== [DEBUG EPISODE START] ===")
-                print(f"obs (reset): type={type(obs)}, len={len(obs) if hasattr(obs,'__len__') else 'N/A'}")
+                    logger.log_step(ep, infos_list[i])
 
             daily_returns = []
             ep_trade_counts = [0 for _ in range(num_envs)]
@@ -329,20 +340,27 @@ if __name__ == "__main__":
             ep_return = m["annualized_pct"]
             all_rewards.append(ep_return)
             avg_trades = float(np.mean(ep_trade_counts))
+
+            # === 新增：計算總 episode 數 ===
+            total_ep = ep * n_envs
+
             summary.append({
-                "episode": ep,
+                "episode_outer": ep,
+                "episode_total": total_ep,
                 "annualized_return_pct": ep_return,
                 "avg_trade_count": avg_trades,
             })
             if upload_wandb and (ep % wandb_every) == 0:
                 wandb.log({
-                    "train/episode": ep,
+                    "train/episode_outer": ep,
+                    "train/episode_total": total_ep,
                     "train/annualized_return_pct": ep_return,
                     "train/avg_trade_count": avg_trades,
                     "train/actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
                     "train/critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
                     "train/entropy": episode_entropy[-1] if episode_entropy else None,
-                }, step=ep)
+                }, step=total_ep)   # ✅ step 改成總 episode 數
+
             if ep % ckpt_freq == 0:
                 ckpt_path = save_checkpoint(run_dir, agent, ep)
                 prune_checkpoints(run_dir, max_ckpts)
@@ -351,6 +369,9 @@ if __name__ == "__main__":
                 total_ret, max_dd, df_perf, df_baseline = run_eval_and_plot(
                     ckpt_path, config_path, data_path_test, ep, recent_curves, upload_wandb
                 )
+                
+            progress_bar.update(n_envs)
+
     finally:
         try:
             envs.close()

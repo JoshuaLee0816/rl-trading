@@ -1,8 +1,8 @@
 training:
   model: "ppo"              # 控制哪個 model 執行
-  n_episodes: 10000         # 總訓練集數
+  n_episodes: 2000         # 總訓練集數
   seed: 42                  # 隨機種子
-  upload_wandb: False        # 要不要上傳到 W&B
+  upload_wandb: true        # 要不要上傳到 W&B
   ckpt_freq: 50             # 每多少 episodes 存一次 checkpoint
   max_ckpts: 5              # 最多保留的 checkpoint 數
 
@@ -17,7 +17,7 @@ model:
   encoder:
     type: "temporal_transformer"        # "identity"(不做變化) | "temporal_transformer"(啟用transformer self-attention) Actor /Critic 前state要不要經過一個encoder
     params:
-      d_model: 2           # Transformer 隱藏維度(每檔最後輸出的向量長度)
+      d_model: 16           # Transformer 隱藏維度(每檔最後輸出的向量長度)
       n_heads: 2            # 分成幾個head關注
       n_layers: 1           # Transformer Encoder 疊幾層 => 每層 = self-attention + FFN + 殘差
       dropout: 0.1          # 每層的dropout rate
@@ -51,8 +51,8 @@ logging:
 
 ppo:
   # 執行設備與並行
-  device: "cpu"
-  num_envs: 1
+  device: "mps"
+  num_envs: 8
   use_subproc: false
 
   # 演算法超參數
@@ -65,22 +65,10 @@ ppo:
   # 最佳化與批次
   actor_lr: 0.00001
   critic_lr: 0.00003
-  batch_size: 64
+  batch_size: 256
   n_steps: 512
-  epochs: 1                 # 每次 update 的 epoch 數
+  epochs: 3                 # 每次 update 的 epoch 數
 
   # 網路結構
-  actor_hidden: 8
-  critic_hidden: 8
-
-dqn:                         # 目前未用（model=ppo 時忽略）
-  gamma: 0.99
-  epsilon_schedule: "per_episode"   # "per_episode" | "per_step"
-  epsilon_start: 1.0
-  epsilon_min: 0.05
-  epsilon_decay: 0.9995
-  lr: 0.0005
-  batch_size: 64
-  buffer_size: 10000
-  target_update_freq: 100
-  device: "auto"            # "cpu" | "mps" | "cuda" | "auto"
+  actor_hidden: 64
+  critic_hidden: 64

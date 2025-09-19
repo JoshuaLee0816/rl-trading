@@ -95,14 +95,15 @@ class PPOAgent:
         self.entropy_log, self.actor_loss_log, self.critic_loss_log = [], [], []
 
         # === Hyperparams ===
-        self.gamma        = float(config.get("gamma", 0.99))
-        self.lam          = float(config.get("gae_lambda", 0.95))
-        self.clip_epsilon = float(config.get("clip_epsilon", 0.2))
-        self.batch_size   = int(config.get("batch_size", 64))
-        self.n_steps      = int(config.get("n_steps", 2048))
-        self.epochs       = int(config.get("epochs", 10))
-        self.entropy_coef = float(config.get("entropy_coef", 0.0))
-        self.value_coef   = float(config.get("value_coef", 0.5))
+        ppo_cfg = config.get("ppo", {})
+        self.gamma        = float(ppo_cfg.get("gamma"))
+        self.lam          = float(ppo_cfg.get("gae_lambda"))
+        self.clip_epsilon = float(ppo_cfg.get("clip_epsilon"))
+        self.batch_size   = int(ppo_cfg.get("batch_size"))
+        self.n_steps      = int(ppo_cfg.get("n_steps"))
+        self.epochs       = int(ppo_cfg.get("epochs"))
+        self.entropy_coef = float(ppo_cfg.get("entropy_coef"))
+        self.value_coef   = float(ppo_cfg.get("value_coef"))
 
         # === 選擇 device ===
         ppo_cfg = config.get("ppo", {})
@@ -130,7 +131,7 @@ class PPOAgent:
         features = config["data"].get("features_clean", config["data"].get("features", []))
         self.F = len(features)
         enc_cfg = config["model"].get("encoder", {"type": "identity"})
-        self.encoder = build_encoder(enc_cfg, F=self.F)
+        self.encoder = build_encoder(enc_cfg, F=self.F).to(self.device)
 
         if enc_cfg["type"] == "identity":
             per_stock_dim = self.F * enc_cfg["params"].get("k_window", 20)
@@ -197,11 +198,12 @@ class PPOAgent:
             return (2, 0, 0)
     # endregion
 
-    # region Select action 
+        # region Select action 
     def select_action(self, obs, action_mask_3d):
         self.actor.eval(); self.critic.eval()
         with torch.no_grad():
-            if isinstance(obs, dict):
+            # === 判斷單環境還是多環境 ===
+            if isinstance(obs, dict):   # 單一環境（dict 格式）
                 features_raw = torch.as_tensor(obs["features"], dtype=torch.float32, device=self.device).unsqueeze(0)
                 z = self.encoder(features_raw)
                 z_flat = z.reshape(1, -1)
@@ -211,31 +213,51 @@ class PPOAgent:
                     anchors = torch.as_tensor(anchors_raw, dtype=torch.float32, device=self.device).unsqueeze(0)
                 else:
                     anchors = torch.zeros((1, 0), dtype=torch.float32, device=self.device)
-                obs_t = torch.cat([z_flat, portfolio, anchors], dim=1)
+                obs_t = torch.cat([z_flat, portfolio, anchors], dim=1)   # [1, obs_dim]
             else:
-                obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
-            obs_t = (obs_t - obs_t.mean()) / (obs_t.std() + 1e-8)
-            mask_flat = self.flatten_mask(action_mask_3d).unsqueeze(0)
-            logits = self.actor(obs_t)
+                obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
+                if obs_t.dim() == 1:  # [obs_dim]
+                    obs_t = obs_t.unsqueeze(0)  # [1, obs_dim]
+
+            B = obs_t.size(0)
+
+            # === 標準化 ===
+            obs_t = (obs_t - obs_t.mean(dim=1, keepdim=True)) / (obs_t.std(dim=1, keepdim=True) + 1e-8)
+
+            # === 處理 mask ===
+            if action_mask_3d is not None:
+                if isinstance(action_mask_3d, (list, tuple)):  # 多環境
+                    mask_flat = torch.stack([self.flatten_mask(m) for m in action_mask_3d], dim=0)
+                else:  # 單一環境
+                    mask_flat = self.flatten_mask(action_mask_3d).unsqueeze(0)
+            else:
+                mask_flat = torch.ones((B, self.A), dtype=torch.bool, device=self.device)
+
+            # === Actor 前向 ===
+            logits = self.actor(obs_t)                  # [B, A]
             masked_logits = logits.masked_fill(~mask_flat, LARGE_NEG)
             dist = Categorical(logits=masked_logits)
-            a_flat = dist.sample()
-            logp   = dist.log_prob(a_flat)
-            value  = self.critic(obs_t)
-            a_flat_int = int(a_flat.item())
-            action_tuple = self.flat_to_tuple(a_flat_int)
-            obs_flat_np  = obs_t.squeeze(0).cpu().numpy()
-            mask_flat_np = mask_flat.squeeze(0).cpu().numpy()
+            a_flat = dist.sample()                      # [B]
+            logp   = dist.log_prob(a_flat)              # [B]
+            value  = self.critic(obs_t)                 # [B]
+
+            # === Decode ===
+            actions_tuple = [self.flat_to_tuple(int(a)) for a in a_flat.tolist()]
 
             if not hasattr(self, "_printed_select"):
                 print("=== [DEBUG SELECT_ACTION] ===")
                 print("obs_t:", obs_t.shape)
                 print("logits:", logits.shape)
                 print("masked_logits:", masked_logits.shape)
-                print("action:", a_flat_int, "tuple:", action_tuple)
+                print("action:", a_flat if B > 1 else int(a_flat.item()), 
+                      "tuple:", actions_tuple if B > 1 else actions_tuple[0])
                 self._printed_select = True
 
-        return action_tuple, a_flat_int, float(logp.item()), float(value.item()), obs_t.squeeze(0), mask_flat.squeeze(0)
+        # === 保持回傳順序 ===
+        if B == 1:  # 單一環境 → 保持舊版格式
+            return actions_tuple[0], int(a_flat.item()), float(logp.item()), float(value.item()), obs_t.squeeze(0), mask_flat.squeeze(0)
+        else:       # 多環境 → 批次格式
+            return actions_tuple, a_flat, logp, value, obs_t, mask_flat
     # endregion
 
     def store_transition(self, obs, action_flat, reward, done, log_prob, value, action_mask_flat):
