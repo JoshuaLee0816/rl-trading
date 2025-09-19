@@ -42,13 +42,21 @@ def step_envs(envs, actions):
     results = [e.step(a) for e, a in zip(envs, actions)]
     next_obs, rewards, dones, truncs, infos = zip(*results)
 
-    # 轉成 list -> tensor (保持和舊 vector env 相同介面)
+    # next_obs 已經是 tensor → stack 成 batch
     next_obs = torch.stack(next_obs)          # [n_envs, obs_dim]
-    rewards  = torch.stack(rewards)           # [n_envs]
-    dones    = torch.tensor(dones)            # [n_envs]
-    truncs   = torch.tensor(truncs)           # [n_envs]
 
+    # rewards 是 tensor → stack 成 batch float
+    rewards = torch.stack(rewards).float()    # [n_envs]
+
+    # dones → float (0.0 或 1.0)，因為 GAE 要數值型
+    dones = torch.tensor(dones, dtype=torch.float32)  # [n_envs]
+
+    # truncs 基本上也是 bool，建議也統一轉 float
+    truncs = torch.tensor(truncs, dtype=torch.float32)  # [n_envs]
+
+    # infos 保留 list of dicts
     return next_obs, rewards, dones, truncs, list(infos)
+
 
 
 def split_infos(infos):
@@ -290,7 +298,10 @@ if __name__ == "__main__":
                     print("=== [DEBUG ENV STEP RESULT] ===")
                     print(f"actions={actions.shape}, rewards={rewards.shape}, dones={dones.shape}")
 
-                action_mask_batch = normalize_mask_batch(infos.get("action_mask_3d", None))
+                # infos 是 list of dicts
+                action_masks = [i.get("action_mask_3d", None) for i in infos]
+                action_mask_batch = normalize_mask_batch(action_masks)
+
                 infos_list = split_infos(infos)
                 for i in range(len(infos_list)):
                     agent.store_transition(
