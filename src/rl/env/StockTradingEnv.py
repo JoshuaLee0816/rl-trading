@@ -262,13 +262,18 @@ class StockTradingEnv:
                 hold_info.extend([avg_cost, floating_ret])
         return torch.tensor(hold_info, dtype=torch.float32, device=self.device)
 
-    def _make_obs(self, t: int) -> torch.Tensor:
-        feats = self._features_window(t)
-        weights = self._weights_vector(t)
-        slot_info = self._slot_info(t)
-        obs = torch.cat([feats, weights, slot_info]).float()
-        obs = (obs - obs.mean()) / (obs.std() + 1e-8)
-        return torch.clamp(obs, -1e6, 1e6)
+    def _make_obs(self, t: int):
+        feats = self.features[t - self.K + 1: t + 1]   # [K, N, F]
+        feats = feats.permute(1, 2, 0)                 # [N, F, K]
+
+        portfolio = self._weights_vector(t)            # [1+N]
+        slot_info = self._slot_info(t)                 # [2*max_holdings]
+
+        return {
+            "features": feats,       # (N, F, K)
+            "portfolio": torch.cat([portfolio, slot_info], dim=0)
+        }
+
     # endregion 小工具部分
 
     # region GymAPI

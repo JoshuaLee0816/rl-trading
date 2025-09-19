@@ -15,7 +15,7 @@ training:
 
 model:
   encoder:
-    type: "identity"        # "identity"(不做變化) | "temporal_transformer"(啟用transformer self-attention) Actor /Critic 前state要不要經過一個encoder
+    type: "temporal_transformer"        # "identity"(不做變化) | "temporal_transformer"(啟用transformer self-attention) Actor /Critic 前state要不要經過一個encoder
     params:
       d_model: 48           # Transformer 隱藏維度(每檔最後輸出的向量長度)
       n_heads: 2            # 分成幾個head關注

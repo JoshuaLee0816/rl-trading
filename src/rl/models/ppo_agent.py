@@ -4,6 +4,7 @@ import torch.optim as optim
 import numpy as np
 import platform
 import wandb
+import time
 from torch.distributions import Categorical
 from rl.models.encoders import build_encoder
 
@@ -158,6 +159,21 @@ class PPOAgent:
             print(f"Actor hidden={ppo_cfg.get('actor_hidden', 64)}, Critic hidden={ppo_cfg.get('critic_hidden', 64)}")
             PPOAgent._printed_init = True
 
+    def obs_to_tensor(self, obs_dict):
+        """
+        將 env 輸出的 dict 轉成 [obs_dim] tensor
+        """
+        # features: (N,F,K) → (1,N,F,K)
+        features_raw = obs_dict["features"].unsqueeze(0).to(self.device)
+        z = self.encoder(features_raw)                  # [1,N,D]
+        z_flat = z.reshape(1, -1)                       # [1,N*D]
+
+        # portfolio: (1+N+2*max_holdings) → (1,dim)
+        portfolio = obs_dict["portfolio"].unsqueeze(0).to(self.device)
+
+        obs_t = torch.cat([z_flat, portfolio], dim=1)   # [1,obs_dim]
+        return obs_t.squeeze(0)                         # [obs_dim]
+
     # region flatten/unflatten
     def flatten_mask(self, mask3):
         if isinstance(mask3, np.ndarray):
@@ -227,20 +243,15 @@ class PPOAgent:
 
     # region Update
     def update(self):
+        t0 = time.perf_counter()
+
         obs, actions, rewards, dones, old_log_probs, values, masks = self.buffer.get()
         self.buffer.clear()
-        """
-        前面已經轉過了
-        device = self.device
-        obs    = torch.tensor(obs,    dtype=torch.float32, device=device)  
-        acts   = torch.tensor(actions, dtype=torch.long,   device=device) 
-        rews   = torch.tensor(rewards, dtype=torch.float32, device=device) 
-        dns    = torch.tensor(dones,   dtype=torch.float32, device=device) 
-        old_lp = torch.tensor(old_log_probs, dtype=torch.float32, device=device)  
-        vals   = torch.tensor(values,  dtype=torch.float32, device=device)        
-        masks  = torch.tensor(masks,   dtype=torch.bool,   device=device)        
-        """
+        t1 = time.perf_counter()
+
         returns, advantages_raw = self._compute_gae(rewards, dones, values)
+        t2 = time.perf_counter()
+
         advantages = (advantages_raw - advantages_raw.mean()) / (advantages_raw.std() + 1e-8)
 
         if wandb.run is not None:
@@ -261,9 +272,13 @@ class PPOAgent:
                 b_oldlp = old_log_probs[b]
                 b_mask  = masks[b]
                 
+                # 前向傳播+動作分布
+                f0 = time.perf_counter()
+
                 logits = self.actor(b_obs)
                 masked_logits = logits.masked_fill(~b_mask, LARGE_NEG)
                 dist = Categorical(logits=masked_logits)
+
                 new_logp = dist.log_prob(b_acts)
                 entropy  = dist.entropy().mean()
                 entropies.append(float(entropy.item()))
@@ -272,6 +287,8 @@ class PPOAgent:
                 surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * b_advs
                 actor_loss = -torch.min(surr1, surr2).mean() - self.entropy_coef * entropy
                 v_pred = self.critic(b_obs)
+                f1 = time.perf_counter()
+
                 critic_loss = (b_rets - v_pred).pow(2).mean() * self.value_coef
                 self.actor_optimizer.zero_grad()
                 self.critic_optimizer.zero_grad()
@@ -284,6 +301,9 @@ class PPOAgent:
                 self.actor_optimizer.step()
                 self.critic_optimizer.step()
 
+                f2 = time.perf_counter()
+                print(f"[PROFILE] batch forward={f1-f0:.4f}s, backward={f2-f1:.4f}s")
+
         if entropies:
             self.entropy_log.append(float(np.mean(entropies)))
 
@@ -294,6 +314,9 @@ class PPOAgent:
             print("advantages:", advantages.shape)
             print("returns:", returns.shape)
             self._printed_update = True
+        
+        t3 = time.perf_counter()
+        print(f"[PROFILE] buffer={t1-t0:.4f}s, gae={t2-t1:.4f}s, update loop={t3-t2:.4f}s")
 
     # endregion Update
 

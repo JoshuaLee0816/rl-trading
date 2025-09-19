@@ -30,19 +30,21 @@ from rl.test.ppo_test import run_test_once   # ✅ 引用測試 function
 
 # region 小工具部分
 
-def reset_envs(envs):
+def reset_envs(envs, agent):
     obs_list, infos_list = [], []
     for e in envs:
         o, i = e.reset()
-        obs_list.append(o)
+        o_t = agent.obs_to_tensor(o)  # 轉 tensor
+        obs_list.append(o_t)
         infos_list.append(i)
-    return obs_list, infos_list
+    return torch.stack(obs_list), infos_list
 
-def step_envs(envs, actions):
+def step_envs(envs, actions, agent):
     results = [e.step(a) for e, a in zip(envs, actions)]
-    next_obs, rewards, dones, truncs, infos = zip(*results)
+    next_obs_dicts, rewards, dones, truncs, infos = zip(*results)
 
     # next_obs 已經是 tensor → stack 成 batch
+    next_obs = [agent.obs_to_tensor(o) for o in next_obs_dicts]
     next_obs = torch.stack(next_obs)          # [n_envs, obs_dim]
 
     # rewards 是 tensor → stack 成 batch float
@@ -253,7 +255,7 @@ if __name__ == "__main__":
         for ep in progress_bar:
 
             # 等同之前的gym .reset()
-            obs, infos = reset_envs(envs)
+            obs, infos = reset_envs(envs, agent)
 
             for t in range(agent.n_steps):
                 actions = []
@@ -263,7 +265,7 @@ if __name__ == "__main__":
                     )
                     actions.append(action_tuple)
 
-                obs, rewards, dones, truncs, infos = step_envs(envs, actions)
+                obs, rewards, dones, truncs, infos = step_envs(envs, actions, agent)
 
             if ep == 1:
                 print("=== [DEBUG EPISODE START] ===")
@@ -293,7 +295,7 @@ if __name__ == "__main__":
                     batch_masks_flat.append(mask_flat_i)
 
                 actions = torch.stack(batch_actions, dim=0)
-                next_obs, rewards, dones, truncs, infos = step_envs(envs, actions)
+                next_obs, rewards, dones, truncs, infos = step_envs(envs, actions, agent)
 
                 if ep == 1 and t == 0:
                     print("=== [DEBUG ENV STEP RESULT] ===")
