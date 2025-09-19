@@ -305,14 +305,16 @@ class StockTradingEnv:
                 self.trade_count += 1
 
         # Reward (思考是否需要reward scaling, 避免advantages過於快速接近0)
-        V_prev = float(self.portfolio_value)
-        V_new  = float(self._mark_to_market(p_close))
+        V_prev = self.portfolio_value
+        V_new  = self._mark_to_market(p_close)
         self.portfolio_value = V_new
+
         portfolio_return = torch.log(torch.clamp(V_new, min=1e-12) / torch.clamp(V_prev, min=1e-12))
-        baseline_return  = torch.log(
-            torch.tensor(self.baseline_close[t + 1], device=self.device) /
-            torch.tensor(self.baseline_close[t], device=self.device)
+
+        baseline_return = torch.log(
+            self.baseline_close[t + 1] / self.baseline_close[t]
         )
+        
         reward = portfolio_return - baseline_return
         if side in ("BUY", "SELL_ALL"):
             reward -= 0.00005
