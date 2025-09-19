@@ -207,14 +207,12 @@ if __name__ == "__main__":
             max_holdings=max_holdings,
             qmax_per_trade=qmax_per_trade,
         )
-    if use_subproc:
-        env = AsyncVectorEnv([make_env for _ in range(num_envs)])
-    else:
-        env = SyncVectorEnv([make_env for _ in range(num_envs)])
-    n_envs = getattr(env, "num_envs", num_envs)
+    # 這裡完全不用 SyncVectorEnv / AsyncVectorEnv
+    envs = [make_env() for _ in range(num_envs)]
+    n_envs = len(envs)
 
     # === 初始化 agent ===
-    _, _, obs_dim, _ = _infer_spaces_and_dims(env)
+    _, _, obs_dim, _ = _infer_spaces_and_dims(envs)
     agent = PPOAgent(
         obs_dim=None,
         num_stocks=num_stocks,
@@ -235,7 +233,7 @@ if __name__ == "__main__":
 
     try:
         for ep in progress_bar:
-            obs, infos = env.reset()
+            obs, infos = envs.reset()
             if ep == 1:
                 print("=== [DEBUG EPISODE START] ===")
                 print(f"obs (reset): type={type(obs)}, len={len(obs) if hasattr(obs,'__len__') else 'N/A'}")
@@ -260,7 +258,7 @@ if __name__ == "__main__":
                     batch_masks_flat.append(mask_flat_i)
 
                 actions = torch.stack(batch_actions, dim=0)
-                next_obs, rewards, dones, truncs, infos = env.step(actions)
+                next_obs, rewards, dones, truncs, infos = envs.step(actions)
 
                 if ep == 1 and t == 0:
                     print("=== [DEBUG ENV STEP RESULT] ===")
@@ -315,7 +313,7 @@ if __name__ == "__main__":
                 )
     finally:
         try:
-            env.close()
+            envs.close()
         except Exception:
             pass
 
