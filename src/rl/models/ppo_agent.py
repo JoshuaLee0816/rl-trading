@@ -302,7 +302,7 @@ class PPOAgent:
                 self.critic_optimizer.step()
 
                 f2 = time.perf_counter()
-                print(f"[PROFILE] batch forward={f1-f0:.4f}s, backward={f2-f1:.4f}s")
+                #print(f"[PROFILE] batch forward={f1-f0:.4f}s, backward={f2-f1:.4f}s")
 
         if entropies:
             self.entropy_log.append(float(np.mean(entropies)))
