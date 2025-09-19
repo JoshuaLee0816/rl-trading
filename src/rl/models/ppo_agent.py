@@ -249,10 +249,10 @@ class PPOAgent:
 
         N = obs.size(0)
         entropies = []
-        for _ in range(self.epochs):
+        for _ in range(self.epochs):                    # 外層loop, 每次update重複幾個epochs
             idxs = np.arange(N)
             np.random.shuffle(idxs)
-            for start in range(0, N, self.batch_size):
+            for start in range(0, N, self.batch_size):  # Mini-batches切分 抽出這一批對應的資料
                 b = idxs[start:start+self.batch_size]
                 b_obs   = obs[b]
                 b_acts  = actions[b]
