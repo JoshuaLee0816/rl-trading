@@ -84,7 +84,13 @@ def run_test_once(actor_path, data_path, config_path,
 
     while not terminated:
         with torch.no_grad():
-            obs_t = torch.tensor(obs, dtype=torch.float32, device=agent.device).unsqueeze(0)
+            
+            if not isinstance(obs, torch.Tensor): # 因為storcktradingEnv已經改成回傳tensor, 所以理論上不需要再torch.tensor()
+                obs_t = torch.tensor(obs, dtype=torch.float32, device=agent.device)
+            else:
+                obs_t = obs.to(agent.device, dtype=torch.float32)
+            obs_t = obs_t.unsqueeze(0)
+
             mask_flat = agent.flatten_mask(info["action_mask_3d"]).unsqueeze(0)
             logits = agent.actor(obs_t)
             masked_logits = logits.masked_fill(~mask_flat, -1e9)
@@ -153,3 +159,4 @@ if __name__ == "__main__":
 
     run_test_once(ACTOR_PATH, DATA_PATH, CONFIG_PATH,
                   plot=True, save_trades=True, tag="2020", verbose=True)
+
