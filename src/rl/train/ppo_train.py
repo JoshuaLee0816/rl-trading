@@ -43,16 +43,13 @@ def split_infos(infos):
         return infos
 
 def normalize_mask_batch(mask_any):
-    import numpy as _np
     if mask_any is None:
         return None
     if isinstance(mask_any, list):
-        return _np.stack(mask_any, axis=0).astype(bool, copy=False)
-    if isinstance(mask_any, _np.ndarray):
-        if mask_any.dtype == object:
-            return _np.stack(list(mask_any), axis=0).astype(bool, copy=False)
-        return mask_any.astype(bool, copy=False)
-    return _np.stack(list(mask_any), axis=0).astype(bool, copy=False)
+        return torch.stack([torch.as_tensor(m, dtype=torch.bool) for m in mask_any])
+    if isinstance(mask_any, torch.Tensor):
+        return mask_any.to(dtype=torch.bool)
+    return torch.stack([torch.as_tensor(m, dtype=torch.bool) for m in mask_any])
 
 def _infer_spaces_and_dims(env):
     os_ = getattr(env, "single_observation_space", env.observation_space)
@@ -86,11 +83,15 @@ def prune_checkpoints(run_dir: Path, max_ckpts: int) -> None:
             except Exception:
                 pass
 
-def compute_episode_metrics(daily_returns: list[float]) -> dict:
-    R_total = float(np.sum(daily_returns)) if daily_returns else 0.0
-    total_return = float(np.exp(R_total) - 1.0)
-    days = len(daily_returns) if daily_returns else 1
-    annualized_return = float((1.0 + total_return) ** (252.0 / days) - 1.0)
+def compute_episode_metrics(daily_returns: list[torch.Tensor]) -> dict:
+    if len(daily_returns) == 0:
+        return {"R_total": 0.0, "total_return": 0.0, "days": 1, "annualized_pct": 0.0}
+
+    daily_returns = torch.cat([r.flatten() for r in daily_returns])
+    R_total = daily_returns.sum().item()
+    total_return = (torch.exp(torch.tensor(R_total)) - 1.0).item()
+    days = daily_returns.numel()
+    annualized_return = ((1.0 + total_return) ** (252.0 / days) - 1.0)
     return {
         "R_total": R_total,
         "total_return": total_return,
@@ -252,12 +253,13 @@ if __name__ == "__main__":
                     obs_i = obs[i]
                     mask_i = action_mask_batch[i] if action_mask_batch is not None else None
                     action_tuple_i, action_flat_i, logp_i, value_i, obs_flat_i, mask_flat_i = agent.select_action(obs_i, action_mask_3d=mask_i)
-                    batch_actions.append(np.asarray(action_tuple_i, dtype=np.int64))
-                    batch_actions_flat.append(int(action_flat_i))
-                    batch_logps.append(float(logp_i))
-                    batch_values.append(float(value_i))
+                    batch_actions.append(torch.as_tensor(action_tuple_i, dtype=torch.long))
+                    batch_actions_flat.append(torch.as_tensor(action_flat_i, dtype=torch.long))
+                    batch_logps.append(torch.as_tensor(logp_i, dtype=torch.float32))
+                    batch_values.append(torch.as_tensor(value_i, dtype=torch.float32))
                     batch_masks_flat.append(mask_flat_i)
-                actions = np.stack(batch_actions, axis=0).astype(np.int64)
+
+                actions = torch.stack(batch_actions, dim=0)
                 next_obs, rewards, dones, truncs, infos = env.step(actions)
 
                 if ep == 1 and t == 0:
@@ -269,18 +271,19 @@ if __name__ == "__main__":
                 for i in range(len(infos_list)):
                     agent.store_transition(
                         obs_flat_i,
-                        int(action_flat_i),
-                        float(rewards[i]),
-                        bool(dones[i]),
-                        float(logp_i),
-                        float(value_i),
-                        mask_flat_i,
+                        batch_actions_flat[i],
+                        rewards[i],
+                        dones[i],
+                        batch_logps[i],
+                        batch_values[i],
+                        batch_masks_flat[i],
                     )
                     logger.log_step(ep, infos_list[i])
                     if "trade_count" in infos_list[i]:
                         ep_trade_counts[i] = infos_list[i]["trade_count"]
                 obs = next_obs
-                daily_returns.extend(rewards.tolist())
+                daily_returns.append(rewards)   # rewards 已經是 tensor [n_envs]
+
             agent.update()
             if len(agent.entropy_log) > 0:
                 episode_entropy.append(agent.entropy_log[-1])
