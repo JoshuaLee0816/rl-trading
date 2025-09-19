@@ -49,10 +49,10 @@ def step_envs(envs, actions):
     rewards = torch.stack(rewards).float()    # [n_envs]
 
     # dones → float (0.0 或 1.0)，因為 GAE 要數值型
-    dones = torch.tensor(dones, dtype=torch.float32)  # [n_envs]
+    dones = torch.as_tensor(dones, dtype=torch.float32)  # [n_envs]
 
     # truncs 基本上也是 bool，建議也統一轉 float
-    truncs = torch.tensor(truncs, dtype=torch.float32)  # [n_envs]
+    truncs = torch.as_tensor(truncs, dtype=torch.float32)  # [n_envs]
 
     # infos 保留 list of dicts
     return next_obs, rewards, dones, truncs, list(infos)
@@ -103,8 +103,9 @@ def compute_episode_metrics(daily_returns: list[torch.Tensor]) -> dict:
         return {"R_total": 0.0, "total_return": 0.0, "days": 1, "annualized_pct": 0.0}
 
     daily_returns = torch.cat([r.flatten() for r in daily_returns])
-    R_total = daily_returns.sum().item()
-    total_return = (torch.exp(torch.tensor(R_total)) - 1.0).item()
+    R_total = daily_returns.sum()
+    total_return = (torch.exp(R_total) - 1.0).item()
+
     days = daily_returns.numel()
     annualized_return = ((1.0 + total_return) ** (252.0 / days) - 1.0)
     return {

@@ -82,6 +82,13 @@ class StockTradingEnv:
         self.reward_mode = reward_mode
         self.device = torch.device(device)
 
+        # baseline 股票 (0050) 不能交易 → 提前建好 mask
+        self.baseline_mask = torch.tensor(
+            [sid == "0050" for sid in self.ids],
+            dtype=torch.bool,
+            device=self.device
+        )
+
         # region 數據檢查
         df = df.copy().sort_values(["date", "stock_id"]).reset_index(drop=True)
         if not {"date", "stock_id", "open", "close"}.issubset(df.columns):
@@ -133,10 +140,12 @@ class StockTradingEnv:
     # endregion 初始化部分
 
     # region 小工具部分
+    """
+    for loop 版本 耗時
     def _build_action_mask(self, t: int) -> torch.Tensor:
-        """
-        回傳形狀 (3, N, QMAX+1) 的布林遮罩 (torch.bool tensor)
-        """
+        
+        #回傳形狀 (3, N, QMAX+1) 的布林遮罩 (torch.bool tensor)
+        
         mask = torch.zeros((3, self.N, self.QMAX + 1), dtype=torch.bool, device=self.device)
         if t + 1 >= self.T:
             mask[2, 0, 0] = True
@@ -168,7 +177,50 @@ class StockTradingEnv:
         # HOLD
         mask[2, 0, 0] = True
         return mask
+    """
 
+    # 向量化版本
+    def _build_action_mask(self, t:int) -> torch.Tensor:
+        #回傳形狀 (3, N, QMAX+1) 的布林遮罩 (torch.bool tensor)
+        mask = torch.zeros((3, self.N, self.QMAX + 1), dtype=torch.bool, device=self.device)
+
+        if t + 1 >= self.T:
+            mask[2, 0, 0] = True
+            return mask
+
+        p_open = self.prices_open[t + 1]  # [N]
+
+        # baseline 0050 mask（這個應該在 __init__ 就建好，這裡直接用 self.baseline_mask）
+        baseline_mask = self.baseline_mask   # shape [N], True=不能交易
+
+        # ============ BUY mask ============
+        # 每檔股票可買的最大 lots 數
+        max_lots = torch.floor(
+            self.cash / (self.lot_size * p_open * (1 + self.fee_buy) + 1e-8)
+        ).to(torch.int)
+
+        # clamp 到 QMAX 範圍
+        max_q = torch.clamp(max_lots, 0, self.QMAX)  # [N]
+
+        # 建立一個 range [0..QMAX]
+        q_range = torch.arange(self.QMAX + 1, device=self.device).view(1, -1)  # [1, QMAX+1]
+
+        # 每檔股票允許的 q 值
+        buy_mask = (q_range <= max_q.unsqueeze(1)) & (q_range >= 1)  # [N, QMAX+1]
+
+        # baseline 股票強制 False
+        buy_mask[baseline_mask] = False
+
+        mask[0] = buy_mask
+
+        # ============ SELL_ALL mask ============
+        sell_mask = (self.shares > 0) & (~baseline_mask)  # [N]
+        mask[1, sell_mask, 0] = True
+
+        # ============ HOLD mask ============
+        mask[2, 0, 0] = True
+        return mask
+    
     def _mark_to_market(self, prices: torch.Tensor) -> torch.Tensor:
         return (self.shares * prices).sum() + self.cash
 
@@ -239,6 +291,7 @@ class StockTradingEnv:
         return obs, info
 
     def step(self, action):
+
         if self._t + 1 >= self.T:
             obs_now = self._make_obs(self._t)
             info_end = {"msg": "no next day", 
@@ -248,6 +301,7 @@ class StockTradingEnv:
             return obs_now, torch.tensor(0.0, device=self.device), True, False, info_end
 
         t = self._t
+
         p_open  = self.prices_open[t + 1]   # t+1 開盤成交
         p_close = self.prices_close[t + 1]  # t+1 收盤估值
 
@@ -314,7 +368,7 @@ class StockTradingEnv:
         baseline_return = torch.log(
             self.baseline_close[t + 1] / self.baseline_close[t]
         )
-        
+
         reward = portfolio_return - baseline_return
         if side in ("BUY", "SELL_ALL"):
             reward -= 0.00005
@@ -331,12 +385,13 @@ class StockTradingEnv:
                     # 指數型懲罰
                     penalty += (torch.exp(-5 * floating_ret) - 1)*0.001
         reward -= penalty
-
+        
+        # --- 生成觀測值 ---
         self._t += 1
         terminated = (self._t + 1 >= self.T)
         obs = self._make_obs(self._t)
         next_mask = self._build_action_mask(self._t)
-
+    
         # holdings_detail (輸出時轉回 python type)
         holdings_detail = {
             s: {
