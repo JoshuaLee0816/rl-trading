@@ -123,7 +123,8 @@ def run_eval_and_plot(
     data_path_test: Path,
     ep: int,
     recent_curves,
-    upload_wandb: bool
+    upload_wandb: bool,
+    total_ep: int
 ):
     total_ret, max_dd, df_perf, df_baseline = run_test_once(
         ckpt_path, data_path_test, config_path,
@@ -239,6 +240,8 @@ if __name__ == "__main__":
         qmax_per_trade=qmax_per_trade,
         config=config,
     )
+
+    print(f"[DEBUG INIT] obs_dim={agent.obs_dim}, action_dim={agent.A}, F={agent.F}")
 
     # === 一次性的 Debug Print ===
     print("=== [DEBUG TRAIN LOOP INIT] ===")
@@ -364,11 +367,20 @@ if __name__ == "__main__":
             if ep % ckpt_freq == 0:
                 ckpt_path = save_checkpoint(run_dir, agent, ep)
                 prune_checkpoints(run_dir, max_ckpts)
-                data_path_test = ROOT / "data" / "processed" / "full" / "walk_forward" / "WF_test_2020_full.parquet"
-                config_path    = ROOT / "config.yaml"
+                config_path = run_dir / "config.yaml"
+                with open(config_path, "r", encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f)
+                data_path_test = ROOT / "data" / "processed" / cfg["data"]["test_file"]
                 total_ret, max_dd, df_perf, df_baseline = run_eval_and_plot(
-                    ckpt_path, config_path, data_path_test, ep, recent_curves, upload_wandb
+                    ckpt_path=ckpt_path,
+                    config_path=config_path,
+                    data_path_test=data_path_test,
+                    ep=ep,
+                    total_ep=total_ep,
+                    recent_curves=recent_curves,
+                    upload_wandb=upload_wandb
                 )
+
                 
             progress_bar.update(n_envs)
 

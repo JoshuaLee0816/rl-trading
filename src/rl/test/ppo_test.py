@@ -50,6 +50,8 @@ def run_test_once(actor_path, data_path, config_path,
 
     # === 建立 PPO Agent ===
     agent = PPOAgent(None, len(ids), envs.QMAX, full_cfg)
+    print(f"[DEBUG INIT] obs_dim={agent.obs_dim}, action_dim={agent.A}, F={agent.F}")
+
 
     # === 載入已訓練好的 actor 參數 ===
     if full_cfg["training"].get("load_checkpoint", True) and actor_path is not None and os.path.exists(actor_path):
@@ -131,18 +133,30 @@ def run_test_once(actor_path, data_path, config_path,
 
     return total_return, max_drawdown, df_perf, df_baseline
 
-
 # === 主程式（獨立跑測試用） ===
 if __name__ == "__main__":
     run_dirs = sorted((ROOT / "logs" / "runs").glob("run_*"))
     latest_run = run_dirs[-1]
     ACTOR_PATH = latest_run / "ppo_actor.pt"
 
-    #print(ACTOR_PATH)
-
-    DATA_PATH = "data/processed/full_300/walk_forward/WF_test_2020_full_300.parquet"
     CONFIG_PATH = ROOT / "config.yaml"
 
-    run_test_once(ACTOR_PATH, DATA_PATH, CONFIG_PATH,
-                  plot=True, save_trades=True, tag="2020", verbose=True)
+    # ✅ 從 config.yaml 讀取測試資料路徑
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    DATA_PATH = ROOT / "data" / "processed" / cfg["data"]["test_file"]
+
+    print(f"[INFO] Using actor checkpoint: {ACTOR_PATH}")
+    print(f"[INFO] Using test dataset: {DATA_PATH}")
+
+    run_test_once(
+        actor_path=ACTOR_PATH,
+        data_path=DATA_PATH,
+        config_path=CONFIG_PATH,
+        plot=True,
+        save_trades=True,
+        tag="2020",
+        verbose=True,
+    )
+
 

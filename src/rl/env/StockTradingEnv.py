@@ -137,48 +137,12 @@ class StockTradingEnv:
         self.obs_dim = self.N * self.features.shape[2] * self.K + (1 + self.N) + 2 * self.max_holdings
         self.action_dim = (3, self.N, self.QMAX + 1)  # MultiDiscrete 的結構 (直接用 tuple 儲存)
 
+        print(f"[DEBUG ENV INIT] obs_dim={self.obs_dim}, action_dim={self.action_dim}, features={df.columns.tolist()}")
+
+
     # endregion 初始化部分
 
     # region 小工具部分
-    """
-    for loop 版本 耗時
-    def _build_action_mask(self, t: int) -> torch.Tensor:
-        
-        #回傳形狀 (3, N, QMAX+1) 的布林遮罩 (torch.bool tensor)
-        
-        mask = torch.zeros((3, self.N, self.QMAX + 1), dtype=torch.bool, device=self.device)
-        if t + 1 >= self.T:
-            mask[2, 0, 0] = True
-            return mask
-
-        p_open = self.prices_open[t + 1]  # [N]
-        baseline_mask = torch.tensor([sid == "0050" for sid in self.ids],
-                                    dtype=torch.bool, device=self.device)
-
-        # BUY
-        for i in range(self.N):
-            if baseline_mask[i]:
-                continue
-            price = p_open[i]
-            if price <= 0:
-                continue
-            max_lots = int(self.cash // (self.lot_size * price * (1 + self.fee_buy)))
-            max_q = min(max_lots, self.QMAX)
-            if max_q >= 1:
-                mask[0, i, 1:max_q + 1] = True
-
-        # SELL_ALL
-        for i in range(self.N):
-            if baseline_mask[i]:
-                continue
-            if self.shares[i] > 0:
-                mask[1, i, 0] = True
-
-        # HOLD
-        mask[2, 0, 0] = True
-        return mask
-    """
-
     # 向量化版本
     def _build_action_mask(self, t:int) -> torch.Tensor:
         #回傳形狀 (3, N, QMAX+1) 的布林遮罩 (torch.bool tensor)
