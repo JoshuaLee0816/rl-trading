@@ -3,23 +3,23 @@ training:
   n_episodes: 2000         # 總訓練集數
   seed: 42                  # 隨機種子
   upload_wandb: true        # 要不要上傳到 W&B
-  ckpt_freq: 10             # 每多少 episodes 存一次 checkpoint
+  ckpt_freq: 100             # 每多少 episodes 存一次 checkpoint
   max_ckpts: 5              # 最多保留的 checkpoint 數
   load_checkpoint: true    # 是否從檢查點載入（未用）
-  """
+  
   # 以下目前未在 src/rl/train/ppo_train.py 使用（保留以後擴充）
   save_freq: 5              # 每幾集更新一次圖（目前未用）
   update_every: 256         # 每幾步更新一次（未用）
   warmup_steps: 10000       # 開始更新前先收集步數（未用）
   grad_steps: 1             # 每次觸發連續更新幾次（未用）
-  """
+  
 
 model:
   encoder:
     type: "temporal_transformer"        # "identity"(不做變化) | "temporal_transformer"(啟用transformer self-attention) Actor /Critic 前state要不要經過一個encoder
     params:
       d_model: 16           # Transformer 隱藏維度(每檔最後輸出的向量長度)
-      n_heads: 2            # 分成幾個head關注
+      n_heads: 1            # 分成幾個head關注
       n_layers: 1           # Transformer Encoder 疊幾層 => 每層 = self-attention + FFN + 殘差
       dropout: 0.1          # 每層的dropout rate
       k_window: 15          # 要和Training pipeline對齊?

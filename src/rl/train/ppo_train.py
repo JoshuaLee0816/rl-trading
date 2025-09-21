@@ -241,8 +241,6 @@ if __name__ == "__main__":
         config=config,
     )
 
-    print(f"[DEBUG INIT] obs_dim={agent.obs_dim}, action_dim={agent.A}, F={agent.F}")
-
     # === 一次性的 Debug Print ===
     print("=== [DEBUG TRAIN LOOP INIT] ===")
     print(f"n_envs={n_envs}, n_steps={agent.n_steps}, batch_size={agent.batch_size}, epochs={agent.epochs}")
@@ -267,10 +265,6 @@ if __name__ == "__main__":
                 # === 執行環境 step ===
                 obs, rewards, dones, truncs, infos = step_envs(envs, actions_tuple, agent)
 
-                if ep == 1 and t == 0:
-                    print("=== [DEBUG ENV STEP RESULT] ===")
-                    print(f"actions={len(actions_tuple)}, rewards={rewards.shape}, dones={dones.shape}")
-
                 # === 存 buffer ===
                 infos_list = split_infos(infos)
                 for i in range(len(infos_list)):
@@ -293,10 +287,6 @@ if __name__ == "__main__":
             action_mask_batch = normalize_mask_batch(action_masks)
 
             for t in range(agent.n_steps):
-                if ep == 1 and t == 0:
-                    print("=== [DEBUG STEP] ===")
-                    print(f"step={t}, action_mask_batch={action_mask_batch.shape if action_mask_batch is not None else None}")
-
                 batch_actions, batch_actions_flat, batch_logps, batch_values, batch_masks_flat = [], [], [], [], []
                 for i in range(n_envs):
                     obs_i = obs[i]
@@ -310,10 +300,6 @@ if __name__ == "__main__":
 
                 actions = torch.stack(batch_actions, dim=0)
                 next_obs, rewards, dones, truncs, infos = step_envs(envs, actions, agent)
-
-                if ep == 1 and t == 0:
-                    print("=== [DEBUG ENV STEP RESULT] ===")
-                    print(f"actions={actions.shape}, rewards={rewards.shape}, dones={dones.shape}")
 
                 # infos 是 list of dicts
                 action_masks = [i.get("action_mask_3d", None) for i in infos]
@@ -342,9 +328,9 @@ if __name__ == "__main__":
             m = compute_episode_metrics(daily_returns)
             ep_return = m["annualized_pct"]
             all_rewards.append(ep_return)
-            avg_trades = float(np.mean(ep_trade_counts))
-
-            # === 新增：計算總 episode 數 ===
+            days = m["days"]
+            avg_trades = float(np.mean(ep_trade_counts))/days*252    #這樣才是年平均交易次數
+            
             total_ep = ep * n_envs
 
             summary.append({
@@ -362,9 +348,9 @@ if __name__ == "__main__":
                     "train/actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
                     "train/critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
                     "train/entropy": episode_entropy[-1] if episode_entropy else None,
-                }, step=total_ep)   # ✅ step 改成總 episode 數
+                }, step=total_ep)   
 
-            if ep % ckpt_freq == 0:
+            if total_ep % ckpt_freq == 0:
                 ckpt_path = save_checkpoint(run_dir, agent, ep)
                 prune_checkpoints(run_dir, max_ckpts)
                 config_path = run_dir / "config.yaml"
@@ -397,5 +383,5 @@ if __name__ == "__main__":
         wandb.save(str(run_dir / "ppo_critic.pt"))
     if config["logging"]["save_summary"]:
         pd.DataFrame(summary).to_csv(run_dir / "summary.csv", index=False)
-    print(f"✅ Training finished. Model=PPO. Results saved in: {run_dir}")
+    print(f"Training finished. Model=PPO. Results saved in: {run_dir}")
 # endregion 主程式
