@@ -106,7 +106,6 @@ class PPOAgent:
         self.value_coef   = float(ppo_cfg.get("value_coef"))
 
         # === 選擇 device ===
-        ppo_cfg = config.get("ppo", {})
         device_cfg = ppo_cfg.get("device", "auto")
         if device_cfg == "cpu":
             self.device = torch.device("cpu")
@@ -142,7 +141,6 @@ class PPOAgent:
         self.obs_dim = self.N * per_stock_dim + (1 + self.N) + 2 * config["environment"]["max_holdings"] + anchors
 
         # === Actor / Critic ===
-        ppo_cfg = config.get("ppo", {})
         self.actor  = Actor(self.obs_dim, self.N, self.QMAX, hidden_dim=ppo_cfg.get("actor_hidden", 64)).to(self.device)
         self.critic = Critic(self.obs_dim, hidden_dim=ppo_cfg.get("critic_hidden", 64)).to(self.device)
 

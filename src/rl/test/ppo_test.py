@@ -20,16 +20,6 @@ from rl.models.ppo_agent import PPOAgent
 
 def run_test_once(actor_path, data_path, config_path,
                   plot=True, save_trades=False, tag="2020", verbose=True):
-    """
-    單次測試 agent
-    - actor_path: checkpoint 路徑
-    - data_path: 測試資料 parquet/csv
-    - config_path: config.yaml
-    - plot: 是否畫資產曲線
-    - save_trades: 是否存交易紀錄
-    - tag: 測試標籤（例如年份）
-    - verbose: 是否在 console 印結果
-    """
 
     # === 載入 config.yaml ===
     with open(config_path, "r", encoding="utf-8") as f:
@@ -46,7 +36,7 @@ def run_test_once(actor_path, data_path, config_path,
     ids = sorted(df["stock_id"].unique())
 
     # === 初始化環境 ===
-    env = StockTradingEnv(
+    envs = StockTradingEnv(
         df=df,
         stock_ids=ids,
         lookback=env_cfg["lookback"],
@@ -55,11 +45,11 @@ def run_test_once(actor_path, data_path, config_path,
         qmax_per_trade=env_cfg["qmax_per_trade"],
     )
 
-    obs, info = env.reset()
-    obs_dim = env.observation_space.shape[0]
+    obs, info = envs.reset()
+    obs_dim = envs.obs_dim
 
     # === 建立 PPO Agent ===
-    agent = PPOAgent(obs_dim, len(ids), env.QMAX, ppo_cfg)
+    agent = PPOAgent(None, len(ids), envs.QMAX, full_cfg)
 
     # === 載入已訓練好的 actor 參數 ===
     if full_cfg["training"].get("load_checkpoint", True) and actor_path is not None and os.path.exists(actor_path):
@@ -74,7 +64,7 @@ def run_test_once(actor_path, data_path, config_path,
         except Exception as e:
             print(f"[WARN] Failed to load checkpoint: {e}. Using random init.")
     else:
-        #print("[INFO] No checkpoint found or load_checkpoint=False. Using random init.")
+        print("[INFO] No checkpoint found or load_checkpoint=False. Using random init.")
         pass
 
 
@@ -85,11 +75,7 @@ def run_test_once(actor_path, data_path, config_path,
     while not terminated:
         with torch.no_grad():
             
-            if not isinstance(obs, torch.Tensor): # 因為storcktradingEnv已經改成回傳tensor, 所以理論上不需要再torch.tensor()
-                obs_t = torch.tensor(obs, dtype=torch.float32, device=agent.device)
-            else:
-                obs_t = obs.to(agent.device, dtype=torch.float32)
-            obs_t = obs_t.unsqueeze(0)
+            obs_t = agent.obs_to_tensor(obs).unsqueeze(0)
 
             mask_flat = agent.flatten_mask(info["action_mask_3d"]).unsqueeze(0)
             logits = agent.actor(obs_t)
@@ -97,7 +83,7 @@ def run_test_once(actor_path, data_path, config_path,
             a_flat = torch.argmax(masked_logits, dim=-1).item()
             action_tuple = agent.flat_to_tuple(a_flat)
 
-        obs, reward, terminated, _, info = env.step(action_tuple)
+        obs, reward, terminated, _, info = envs.step(action_tuple)
 
         dates.append(info["date"])
         values.append(info["V"])
@@ -117,8 +103,8 @@ def run_test_once(actor_path, data_path, config_path,
         print(f"[TEST-{tag}] Total Return: {total_return:.2%}, Max Drawdown: {max_drawdown:.2%}")
 
     # === baseline 計算 ===
-    baseline_value = (env.baseline_close / env.baseline_close[env.K]) * env.initial_cash
-    df_baseline = pd.DataFrame({"date": env.dates[env.K:], "baseline": baseline_value[env.K:]})
+    baseline_value = (envs.baseline_close / envs.baseline_close[envs.K]) * envs.initial_cash
+    df_baseline = pd.DataFrame({"date": envs.dates[envs.K:], "baseline": baseline_value[envs.K:]})
     df_baseline["date"] = pd.to_datetime(df_baseline["date"])
     df_baseline.set_index("date", inplace=True)
 

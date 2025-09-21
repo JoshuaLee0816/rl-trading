@@ -127,7 +127,7 @@ def run_eval_and_plot(
 ):
     total_ret, max_dd, df_perf, df_baseline = run_test_once(
         ckpt_path, data_path_test, config_path,
-        plot=False, save_trades=False, tag=f"ep{ep}", verbose=False
+        plot=False, save_trades=False, tag=f"ep{ep}", verbose=True
     )
     recent_curves.append((ep, df_perf))
     plt.figure(figsize=(10, 6))
@@ -144,7 +144,7 @@ def run_eval_and_plot(
             "test/total_return": total_ret,
             "test/max_drawdown": max_dd,
             "test/portfolio_curves": wandb.Image(plt)
-        }, step=ep)
+        }, step=total_ep)
     plt.close()
     return total_ret, max_dd, df_perf, df_baseline
 # endregion 小工具部分
