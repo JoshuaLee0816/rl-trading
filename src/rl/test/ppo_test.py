@@ -50,8 +50,6 @@ def run_test_once(actor_path, data_path, config_path,
 
     # === 建立 PPO Agent ===
     agent = PPOAgent(None, len(ids), envs.QMAX, full_cfg)
-    print(f"[DEBUG INIT] obs_dim={agent.obs_dim}, action_dim={agent.A}, F={agent.F}")
-
 
     # === 載入已訓練好的 actor 參數 ===
     if full_cfg["training"].get("load_checkpoint", True) and actor_path is not None and os.path.exists(actor_path):
@@ -128,8 +126,6 @@ def run_test_once(actor_path, data_path, config_path,
         out_path.parent.mkdir(parents=True, exist_ok=True)
         df_trades = pd.DataFrame(actions, columns=["date", "side", "stock_id", "lots", "cash", "value"])
         df_trades.to_csv(out_path, index=False)
-        if verbose:
-            print(f"交易紀錄已存 {out_path}")
 
     return total_return, max_drawdown, df_perf, df_baseline
 
@@ -141,7 +137,7 @@ if __name__ == "__main__":
 
     CONFIG_PATH = ROOT / "config.yaml"
 
-    # ✅ 從 config.yaml 讀取測試資料路徑
+    # 從 config.yaml 讀取測試資料路徑
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     DATA_PATH = ROOT / "data" / "processed" / cfg["data"]["test_file"]
