@@ -197,12 +197,12 @@ class StockTradingEnv:
                 floating_ret = (price - avg_cost) / avg_cost if avg_cost > 0 else 0.0
                 hold_info.extend([avg_cost, floating_ret])
         return torch.tensor(hold_info, dtype=torch.float32, device=self.device)
-
+    """
     def _make_obs(self, t: int):
         start = time.time()
 
         feats = self.features[t - self.K + 1: t + 1]   # [K, N, F]
-        feats = feats.permute(1, 2, 0)                 # [N, F, K]
+        #feats = feats.permute(1, 2, 0)                 # [N, F, K]
 
         portfolio = self._weights_vector(t)            # [1+N]
         slot_info = self._slot_info(t)                 # [2*max_holdings]
@@ -211,6 +211,22 @@ class StockTradingEnv:
             "features": feats,       # (N, F, K)
             "portfolio": torch.cat([portfolio, slot_info], dim=0)
         }
+    """
+    def _make_obs(self, t: int):
+        feats = self.features[t - self.K + 1 : t + 1]   # [K, N, F]
+        feats = torch.as_tensor(feats, dtype=torch.float32)  # 確保是 Tensor
+
+        # 加 batch 維
+        # feats = feats.unsqueeze(0)  # [1, K, N, F]
+
+        portfolio = self._weights_vector(t)  # [1+N]
+        slot_info = self._slot_info(t)       # [2*max_holdings]
+
+        return {
+            "features": feats,  # (1, K, N, F)
+            "portfolio": torch.cat([portfolio, slot_info], dim=0)
+        }
+
 
     # endregion 小工具部分
 
