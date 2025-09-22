@@ -41,6 +41,10 @@ def reset_envs(envs, agent):
     return torch.stack(obs_list), infos_list
 
 def step_envs(envs, actions, agent):
+    # 如果是單環境 → actions 可能是單個 int/tensor
+    if len(envs) == 1:
+        actions = [actions]
+
     results = [e.step(a) for e, a in zip(envs, actions)]
     next_obs_dicts, rewards, dones, truncs, infos = zip(*results)
 
@@ -257,7 +261,7 @@ if __name__ == "__main__":
         for ep in progress_bar:
             # 等同之前的gym .reset()
             obs, infos = reset_envs(envs, agent)
-
+            start_episode_time = time.time()
             start = time.perf_counter()
             for t in range(agent.n_steps):
                 # === 批次 action ===
@@ -371,8 +375,6 @@ if __name__ == "__main__":
                     recent_curves=recent_curves,
                     upload_wandb=upload_wandb
                 )
-
-                
             progress_bar.update(n_envs)
 
     finally:

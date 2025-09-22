@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import pandas as pd
+import time
 
 from rl.env.rewards import get_reward_fn
 
@@ -50,6 +51,8 @@ class StockTradingEnv:
         self.rng = torch.Generator(device=device).manual_seed(seed)  # torch 替代 np.random
         self.reward_fn = get_reward_fn(reward_mode)
         self.device = torch.device(device)
+        self._timing_stats = None   # 每次 reset 初始化
+
 
         # baseline 股票 (0050) 不能交易 → 提前建好 mask
         self.baseline_mask = torch.tensor(
@@ -196,6 +199,8 @@ class StockTradingEnv:
         return torch.tensor(hold_info, dtype=torch.float32, device=self.device)
 
     def _make_obs(self, t: int):
+        start = time.time()
+
         feats = self.features[t - self.K + 1: t + 1]   # [K, N, F]
         feats = feats.permute(1, 2, 0)                 # [N, F, K]
 
@@ -211,11 +216,13 @@ class StockTradingEnv:
 
     # region GymAPI
     def reset(self, *, seed=None, options=None):
+        stats_to_report = self._timing_stats  # 暫存上一輪的統計
         self._t = self.K
         self.cash = torch.tensor(float(self.initial_cash), dtype=torch.float32, device=self.device)
         self.shares = torch.zeros(self.N, dtype=torch.float32, device=self.device)
         self.avg_costs = torch.zeros(self.N, dtype=torch.float32, device=self.device)
-        self.slots = [None] * self.max_holdings
+        #self.slots = [None] * self.max_holdings
+        self.slots = torch.full((self.max_holdings,), -1, dtype=torch.long, device=self.device)
         self.portfolio_value = torch.tensor(float(self.initial_cash), dtype=torch.float32, device=self.device)
         self.trade_count = 0
 
@@ -226,10 +233,25 @@ class StockTradingEnv:
             "V": self.portfolio_value.item(),   # 轉成 python int，方便 log
             "action_mask_3d": action_mask_3d    # 保留 torch tensor，PPO 可以直接用
         }
+
+        # 初始化計時器
+        self._timing_stats = {
+            "check": 0.0,
+            "prices": 0.0,
+            "mask": 0.0,
+            "trade": 0.0,
+            "reward": 0.0,
+            "obs": 0.0,
+            "info": 0.0,
+            "total": 0.0,
+        }
+
         return obs, info
 
     def step(self, action):
+        t_start = time.time()
 
+        start = time.time()
         if self._t + 1 >= self.T:
             obs_now = self._make_obs(self._t)
             info_end = {"msg": "no next day", 
@@ -237,17 +259,24 @@ class StockTradingEnv:
                         "action_mask_3d": self._build_action_mask(self._t),
             }
             return obs_now, torch.tensor(0.0, device=self.device), True, False, info_end
+        self._timing_stats["check"] += time.time() - start
 
+        start = time.time()
         t = self._t
 
         p_open  = self.prices_open[t + 1]   # t+1 開盤成交
         p_close = self.prices_close[t + 1]  # t+1 收盤估值
+        self._timing_stats["prices"] += time.time() - start
 
         op, idx, q = int(action[0]), int(action[1]), int(action[2])
         side, exec_shares, gross_cash, fees_tax = "HOLD", 0, 0, 0
+
+        start = time.time()
         mask = self._build_action_mask(t)
+        self._timing_stats["mask"] += time.time() - start
 
         # BUY
+        start = time.time()
         if op == 0 and 0 <= idx < self.N and 1 <= q <= self.QMAX and mask[0, idx, q]:
             price = float(p_open[idx])
 
@@ -295,18 +324,24 @@ class StockTradingEnv:
                         break
                 side, exec_shares, gross_cash, fees_tax = "SELL_ALL", -shares, gross, fee + tax
                 self.trade_count += 1
+            self._timing_stats["trade"] += time.time() - start
 
         # Reward
+        start = time.time()
         reward, reward_info = self.reward_fn(self, action, side, p_close, t)
+        self._timing_stats["reward"] += time.time() - start
 
         
         # --- 生成觀測值 ---
+        start = time.time()
         self._t += 1
         terminated = (self._t + 1 >= self.T)
         obs = self._make_obs(self._t)
         next_mask = self._build_action_mask(self._t)
+        self._timing_stats["obs"] += time.time() - start
     
         # holdings_detail (輸出時轉回 python type)
+        start = time.time()
         holdings_detail = {
             s: {
                 "stock_id": self.ids[i] if i is not None else None,
@@ -338,5 +373,16 @@ class StockTradingEnv:
             "holdings_detail": holdings_detail,
             **reward_info
         }
+        self._timing_stats["info"] += time.time() - start
+
+        self._timing_stats["total"] += time.time() - t_start
+
+        """
+        print("[PROFILE][Episode timing]")
+        total = self._timing_stats["total"]
+        for k, v in self._timing_stats.items():
+            pct = (v / total * 100) if total > 0 else 0.0
+            print(f"  {k:<8}: {v:.4f}s  ({pct:4.1f}%)")
+        """
 
         return obs, reward, terminated, False, info

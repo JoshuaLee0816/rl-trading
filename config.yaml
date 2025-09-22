@@ -54,7 +54,7 @@ logging:
 ppo:
   # 執行設備與並行
   device: "mps"
-  num_envs: 4
+  num_envs: 2
   use_subproc: false
 
   # 演算法超參數

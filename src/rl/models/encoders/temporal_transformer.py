@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import time
 
 class PositionalEncoding(nn.Module):
     """
@@ -52,22 +53,35 @@ class TemporalTransformerEncoder(nn.Module):
         self.out_ln = nn.LayerNorm(d_model)
 
     def forward(self, x):  # x: [B, N, F, K]
+        times = {}
+        total_start = time.time()
+
         B, N, F, K = x.shape
 
         # 調整維度順序，把時間 K 放在中間 -> 只是為了符合transformer預期的維度順序 (PyToch 官方transformerencoderlayer要求)
+        start = time.time()
         x = x.permute(0,1,3,2)    # [B,N,F,K] -> [B,N,K,F]
+        times["permute"] = time.time() - start
 
         # 線性投影，把 F -> d_model   (每天的特徵向量 -> 投影到 Transformer 的工作空間 D 維)
+        start = time.time()
         x = self.proj(x)          # [B,N,K,D]
+        times["proj"] = time.time() - start
 
         # 展平成 (B*N, K, D)，這樣 PositionalEncoding 只處理時間維 K
+        start = time.time()
         x = x.reshape(B * N, K, -1)
+        times["reshape"] = time.time() - start
 
         # 加位置編碼
+        start = time.time()
         x = self.pe(x)            # [B,N,K,D]
+        times["posenc"] = time.time() - start
 
         # 丟進 Transformer encoder (在 K 維上做 self-attention)
+        start = time.time()
         x = self.encoder(x)       # [B,N,K,D]
+        times["transformer"] = time.time() - start
 
         """
         經過transformer後, 輸出是[B,N,K,D]
@@ -78,10 +92,27 @@ class TemporalTransformerEncoder(nn.Module):
         但要注意 我認為mean pooling是有可能lose時間序列的關係性 之後可以考慮換乘attention pooling 現在先用baseline處理
         """
         # mean pooling over K
+        start = time.time()
         z = x.mean(dim=1)        # [B*N, D]
+        times["pooling"] = time.time() - start
 
         # reshape 回 [B, N, D]
+        start = time.time()
         z = z.view(B, N, -1)     # [B, N, D]
+        times["reshape_back"] = time.time() - start
 
         # LayerNorm 清理數值 避免梯度爆炸或不穩
-        return self.out_ln(z)     # [B,N,D]
+        start = time.time()
+        out = self.out_ln(z)         # [B, N, D]
+        times["layernorm"] = time.time() - start
+
+        total = time.time() - total_start
+        """
+        print("[PROFILE][Encoder] total={:.4f}s | {}".format(
+            total,
+            ", ".join([f"{k}={v:.4f}" for k, v in times.items()])
+        ))
+        """
+
+
+        return out    # [B,N,D]
