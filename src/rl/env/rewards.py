@@ -40,5 +40,17 @@ def daily_return(env, action, side, p_close, t):
                 penalty += (torch.exp(-5 * floating_ret) - 1) * 0.001
     reward -= penalty
 
-    return reward, baseline_return
+    return reward, {
+        "baseline_return": float(baseline_return.item()),
+    }
 # endregion Daily Return
+
+
+# region 取得def
+def get_reward_fn(mode: str):
+    if mode == "daily_return":
+        return daily_return
+    else:
+        raise ValueError(f"Unknown reward mode: {mode}")
+
+# endregion 取得def

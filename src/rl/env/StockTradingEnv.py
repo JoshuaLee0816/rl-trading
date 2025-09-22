@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 import pandas as pd
 
-from rl.env.rewards import daily_return
+from rl.env.rewards import get_reward_fn
 
 class StockTradingEnv:
 
@@ -48,7 +48,7 @@ class StockTradingEnv:
         self.fee_buy, self.fee_sell, self.tax_sell = float(fee_buy), float(fee_sell), float(tax_sell)
         self.lot_size = int(lot_size)
         self.rng = torch.Generator(device=device).manual_seed(seed)  # torch 替代 np.random
-        self.reward_mode = reward_mode
+        self.reward_fn = get_reward_fn(reward_mode)
         self.device = torch.device(device)
 
         # baseline 股票 (0050) 不能交易 → 提前建好 mask
@@ -297,7 +297,8 @@ class StockTradingEnv:
                 self.trade_count += 1
 
         # Reward
-        reward, baseline_return = daily_return(self, action, side, p_close, t)
+        reward, reward_info = self.reward_fn(self, action, side, p_close, t)
+
         
         # --- 生成觀測值 ---
         self._t += 1
@@ -332,10 +333,10 @@ class StockTradingEnv:
             "cash": int(round(self.cash.item())),
             "held": int((self.shares > 0).sum().item()),
             "action_mask_3d": next_mask,
-            "baseline_return": float(baseline_return.item()),
             "trade_count": self.trade_count,
             "slots_mapping": {s: (self.ids[i] if i is not None else None) for s, i in enumerate(self.slots)},
             "holdings_detail": holdings_detail,
+            **reward_info
         }
 
         return obs, reward, terminated, False, info
