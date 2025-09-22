@@ -2,6 +2,7 @@ import os
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 import sys
+import time
 import yaml
 import numpy as np
 import pandas as pd
@@ -257,6 +258,7 @@ if __name__ == "__main__":
             # 等同之前的gym .reset()
             obs, infos = reset_envs(envs, agent)
 
+            start = time.perf_counter()
             for t in range(agent.n_steps):
                 # === 批次 action ===
                 mask_batch = [i.get("action_mask_3d", None) for i in infos]
@@ -321,6 +323,9 @@ if __name__ == "__main__":
                         ep_trade_counts[i] = infos_list[i]["trade_count"]
                 obs = next_obs
                 daily_returns.append(rewards)   # rewards 已經是 tensor [n_envs]
+            
+            end = time.perf_counter()
+            print(f"[DEBUG] Rollout (env interaction) 花費 {end - start:.3f} 秒")
 
             agent.update()
             if len(agent.entropy_log) > 0:
