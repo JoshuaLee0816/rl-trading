@@ -4,40 +4,9 @@ import torch.nn.functional as F
 import numpy as np
 import pandas as pd
 
+from rl.env.rewards import daily_return
+
 class StockTradingEnv:
-    """
-    StockTradingEnv (Broker-style, 1 trade per day)
-
-    ▶ Observation (obs)
-      shape = (N*F*K) + (1 + N) + (2 * max_holdings)
-      = [K天 * N檔 * F特徵攤平] + [現金佔比] + [各股市值佔比(用t日收盤估值)] + [持倉槽位資訊]
-      調用時序：在 t 觀測 → t 決策 → t+1 開盤成交 → t+1 收盤估值
-
-    ▶ Action (MultiDiscrete([3, N, QMAX+1]))
-      op  ∈ {0,1,2} = {BUY, SELL_ALL, HOLD}
-      idx ∈ {0..N-1}   股票索引
-      q   ∈ {0..QMAX}  買入張數（單位=張，=1000股；僅 BUY 時有效，q>=1 才有意義）
-      * 每天只會執行一筆（買或全賣或不動） 
-      * 不合法動作不懲罰，直接視為 HOLD（建議在 policy 端用 action_mask 做 masked softmax）
-
-    ▶ Reward
-      r_t = log( V_{t+1} / V_t )，以 t+1 收盤估值，已含交易成本/稅
-      Set 0050 as baseline
-      Penalty for high frequents trades -> cause log in r_t , so penalty would be set between 0.01 and 0.0001
-
-    ▶ 限制
-      - 只能整張交易（lot_size=1000）
-      - 最多同時持有 max_holdings 檔（新開倉受限；既有持倉可加碼）
-      - 交易成本：fee_buy / fee_sell；賣出另計 tax_sell
-
-    ▶ reset() 回傳: (obs, info)
-       info["action_mask"] 形狀 (3, N, QMAX+1)
-
-    ▶ step(action) 回傳: (obs, reward, terminated, truncated, info)
-       - terminated：到資料尾端
-       - truncated：False（如需爆倉線可自行擴充）
-       - info：紀錄當日動作、費稅、現金、持股數、下一步 action_mask
-    """
 
     # region 初始化部分
     def __init__(
@@ -327,33 +296,8 @@ class StockTradingEnv:
                 side, exec_shares, gross_cash, fees_tax = "SELL_ALL", -shares, gross, fee + tax
                 self.trade_count += 1
 
-        # Reward (思考是否需要reward scaling, 避免advantages過於快速接近0)
-        V_prev = self.portfolio_value
-        V_new  = self._mark_to_market(p_close)
-        self.portfolio_value = V_new
-
-        portfolio_return = torch.log(torch.clamp(V_new, min=1e-12) / torch.clamp(V_prev, min=1e-12))
-
-        baseline_return = torch.log(
-            self.baseline_close[t + 1] / self.baseline_close[t]
-        )
-
-        reward = portfolio_return - baseline_return
-        if side in ("BUY", "SELL_ALL"):
-            reward -= 0.00005
-
-        # === 個股懲罰 (slot-based) ===
-        penalty = torch.tensor(0.0, device=self.device)
-        for s, i in enumerate(self.slots):
-            if i is not None and self.avg_costs[i] > 0:
-                cur_price = self.prices_close[self._t, i]
-                floating_ret = (cur_price - self.avg_costs[i]) / self.avg_costs[i]
-                if floating_ret < 0:
-                    # 線性懲罰
-                    # penalty += abs(floating_ret) * 0.05   # α=0.05，可調
-                    # 指數型懲罰
-                    penalty += (torch.exp(-5 * floating_ret) - 1)*0.001
-        reward -= penalty
+        # Reward
+        reward, baseline_return = daily_return(self, action, side, p_close, t)
         
         # --- 生成觀測值 ---
         self._t += 1
