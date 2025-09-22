@@ -2,7 +2,7 @@ training:
   model: "ppo"              # 控制哪個 model 執行
   n_episodes: 2000         # 總訓練集數
   seed: 42                  # 隨機種子
-  upload_wandb: true        # 要不要上傳到 W&B
+  upload_wandb: false        # 要不要上傳到 W&B
   ckpt_freq: 100             # 每多少 episodes 存一次 checkpoint
   max_ckpts: 5              # 最多保留的 checkpoint 數
   load_checkpoint: true    # 是否從檢查點載入（未用）
