@@ -268,6 +268,11 @@ if __name__ == "__main__":
                 mask_batch = [i.get("action_mask_3d", None) for i in infos]
                 actions_tuple, actions_flat, logps, values, obs_batch, mask_batch = agent.select_action(obs, mask_batch)
 
+                # 確保單環境時也有 batch 維度 (Tensor 版本)
+                actions_flat = torch.atleast_1d(actions_flat)
+                logps        = torch.atleast_1d(logps)
+                values       = torch.atleast_1d(values)
+
                 # === 執行環境 step ===
                 obs, rewards, dones, truncs, infos = step_envs(envs, actions_tuple, agent)
 
@@ -292,6 +297,8 @@ if __name__ == "__main__":
             action_masks = [i.get("action_mask_3d", None) for i in infos]
             action_mask_batch = normalize_mask_batch(action_masks)
 
+            """
+            似乎這段是多餘的 多算了一次rollout buffer
             for t in range(agent.n_steps):
                 batch_actions, batch_actions_flat, batch_logps, batch_values, batch_masks_flat = [], [], [], [], []
                 for i in range(n_envs):
@@ -327,7 +334,7 @@ if __name__ == "__main__":
                         ep_trade_counts[i] = infos_list[i]["trade_count"]
                 obs = next_obs
                 daily_returns.append(rewards)   # rewards 已經是 tensor [n_envs]
-            
+            """
             end = time.perf_counter()
             print(f"[DEBUG] Rollout (env interaction) 花費 {end - start:.3f} 秒")
 
