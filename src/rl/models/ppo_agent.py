@@ -196,7 +196,7 @@ class PPOAgent:
             return (2, 0, 0)
     # endregion
 
-        # region Select action 
+    # region Select action 
     def select_action(self, obs, action_mask_3d):
         self.actor.eval(); self.critic.eval()
         with torch.no_grad():
@@ -253,10 +253,10 @@ class PPOAgent:
 
         # === 保持回傳順序 ===
         if B == 1:  # 單一環境 → 保持舊版格式
-            return actions_tuple[0], int(a_flat.item()), float(logp.item()), float(value.item()), obs_t.squeeze(0), mask_flat.squeeze(0)
+            return actions_tuple[0], int(a_flat.item()), float(logp.item()), float(value.item()), obs_t, mask_flat
         else:       # 多環境 → 批次格式
             return actions_tuple, a_flat, logp, value, obs_t, mask_flat
-    # endregion
+    # endregion Select action
 
     def store_transition(self, obs, action_flat, reward, done, log_prob, value, action_mask_flat):
         self.buffer.add(obs, action_flat, reward, done, log_prob, value, action_mask_flat)

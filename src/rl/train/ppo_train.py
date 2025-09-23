@@ -280,7 +280,6 @@ if __name__ == "__main__":
                 # === 存 buffer ===
                 infos_list = split_infos(infos)
                 for i in range(len(infos_list)):
-                    obs_flat = agent.obs_to_tensor(obs_batch[i]).view(-1)  #  強制展平成 (obs_dim,)
                     agent.store_transition(
                         obs_batch[i],          # [obs_dim]
                         actions_flat[i],       # 單個動作 index
