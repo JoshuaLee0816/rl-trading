@@ -269,9 +269,10 @@ if __name__ == "__main__":
                 actions_tuple, actions_flat, logps, values, obs_batch, mask_batch = agent.select_action(obs, mask_batch)
 
                 # 確保單環境時也有 batch 維度 (Tensor 版本)
-                actions_flat = torch.atleast_1d(actions_flat)
-                logps        = torch.atleast_1d(logps)
-                values       = torch.atleast_1d(values)
+                actions_flat = torch.atleast_1d(torch.as_tensor(actions_flat, device=agent.device))
+                logps        = torch.atleast_1d(torch.as_tensor(logps, device=agent.device))
+                values       = torch.atleast_1d(torch.as_tensor(values, device=agent.device))
+
 
                 # === 執行環境 step ===
                 obs, rewards, dones, truncs, infos = step_envs(envs, actions_tuple, agent)
@@ -279,6 +280,7 @@ if __name__ == "__main__":
                 # === 存 buffer ===
                 infos_list = split_infos(infos)
                 for i in range(len(infos_list)):
+                    obs_flat = agent.obs_to_tensor(obs_batch[i]).view(-1)  #  強制展平成 (obs_dim,)
                     agent.store_transition(
                         obs_batch[i],          # [obs_dim]
                         actions_flat[i],       # 單個動作 index
