@@ -255,7 +255,7 @@ if __name__ == "__main__":
     all_rewards, summary = [], []
     trade_sample_freq = config["logging"].get("trade_sample_freq", 10)
     logger = RunLogger(run_dir, trade_sample_freq)
-    progress_bar = trange(1, n_episodes * n_envs + 1, unit="episode")
+    progress_bar = trange(1, n_episodes * n_envs + 1, unit="episode", unit_scale = n_envs)
 
     try:
         for ep in progress_bar:
@@ -375,7 +375,7 @@ if __name__ == "__main__":
                     recent_curves=recent_curves,
                     upload_wandb=upload_wandb
                 )
-            progress_bar.update(n_envs)
+            #progress_bar.update(n_envs)
 
     finally:
         try:
