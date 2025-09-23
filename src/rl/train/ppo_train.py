@@ -298,44 +298,6 @@ if __name__ == "__main__":
             action_masks = [i.get("action_mask_3d", None) for i in infos]
             action_mask_batch = normalize_mask_batch(action_masks)
 
-            """
-            似乎這段是多餘的 多算了一次rollout buffer
-            for t in range(agent.n_steps):
-                batch_actions, batch_actions_flat, batch_logps, batch_values, batch_masks_flat = [], [], [], [], []
-                for i in range(n_envs):
-                    obs_i = obs[i]
-                    mask_i = action_mask_batch[i] if action_mask_batch is not None else None
-                    action_tuple_i, action_flat_i, logp_i, value_i, obs_flat_i, mask_flat_i = agent.select_action(obs_i, action_mask_3d=mask_i)
-                    batch_actions.append(torch.as_tensor(action_tuple_i, dtype=torch.long))
-                    batch_actions_flat.append(torch.as_tensor(action_flat_i, dtype=torch.long))
-                    batch_logps.append(torch.as_tensor(logp_i, dtype=torch.float32))
-                    batch_values.append(torch.as_tensor(value_i, dtype=torch.float32))
-                    batch_masks_flat.append(mask_flat_i)
-
-                actions = torch.stack(batch_actions, dim=0)
-                next_obs, rewards, dones, truncs, infos = step_envs(envs, actions, agent)
-
-                # infos 是 list of dicts
-                action_masks = [i.get("action_mask_3d", None) for i in infos]
-                action_mask_batch = normalize_mask_batch(action_masks)
-
-                infos_list = split_infos(infos)
-                for i in range(len(infos_list)):
-                    agent.store_transition(
-                        obs_flat_i,
-                        batch_actions_flat[i],
-                        rewards[i],
-                        dones[i],
-                        batch_logps[i],
-                        batch_values[i],
-                        batch_masks_flat[i],
-                    )
-                    logger.log_step(ep, infos_list[i])
-                    if "trade_count" in infos_list[i]:
-                        ep_trade_counts[i] = infos_list[i]["trade_count"]
-                obs = next_obs
-                daily_returns.append(rewards)   # rewards 已經是 tensor [n_envs]
-            """
             end = time.perf_counter()
             print(f"[DEBUG] Rollout (env interaction) 花費 {end - start:.3f} 秒")
 
