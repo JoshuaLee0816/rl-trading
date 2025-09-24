@@ -14,6 +14,7 @@ LARGE_NEG = -1e9
 # ===================== Actor / Critic =====================
 class Actor(nn.Module):
     def __init__(self, obs_dim, num_stocks, qmax, hidden_dim=256):
+
         super().__init__()
         self.N = int(num_stocks)
         self.QMAX = int(qmax)

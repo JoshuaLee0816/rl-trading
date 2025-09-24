@@ -269,13 +269,26 @@ if __name__ == "__main__":
     # envs = [make_env() for _ in range(num_envs)]
     # n_envs = len(envs)
 
-    envs = TorchVecEnv([make_env() for _ in range(num_envs)])
+    envs = TorchVecEnv([make_env for _ in range(num_envs)])
     n_envs = envs.num_envs
 
 
+    # 先 reset 一次，取得 obs_dict，並經過 obs_to_tensor 算出正確 obs_dim
+    tmp_obs_dicts, _ = envs.reset()
+    tmp_obs_tensor = PPOAgent(obs_dim=1,   # 先給假的，等等不用這個
+                            num_stocks=num_stocks,
+                            qmax_per_trade=qmax_per_trade,
+                            config=config).obs_to_tensor(tmp_obs_dicts[0])
+
+    obs_dim = tmp_obs_tensor.shape[-1]
+
+    print("=== DEBUG INIT ===")
+    print(f"env 報告的 raw obs_dim = {envs.obs_dim}")
+    print(f"實際 obs_to_tensor 轉換後的 obs_dim = {obs_dim}")
+
     # === 初始化 agent ===
-    obs_dim = envs[0].obs_dim
-    action_dim = envs[0].action_dim
+    obs_dim = envs.obs_dim
+    action_dim = envs.action_dim
 
     agent = PPOAgent(
         obs_dim= obs_dim,
