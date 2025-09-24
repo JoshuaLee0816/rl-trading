@@ -160,7 +160,7 @@ class PPOAgent:
 
     def obs_to_tensor(self, obs_dict):
         """
-        將 env 輸出的 dict 轉成 [obs_dim] tensor
+        將 env 輸出的 dict 轉成 [obs_dim] tensor 我現在假設在ppo_train裡面來做全部一起轉tensor
         """
         # features: (N,F,K) → (1,N,F,K)
         features_raw = obs_dict["features"].unsqueeze(0).to(self.device)

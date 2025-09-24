@@ -30,7 +30,41 @@ from rl.train.logger import RunLogger
 from rl.test.ppo_test import run_test_once   # ✅ 引用測試 function
 
 # region 小工具部分
+class TorchVecEnv:
+    def __init__(self, make_env_fns):
+        self.envs = [fn() for fn in make_env_fns]
+        self.num_envs = len(self.envs)
+        self.obs_dim = self.envs[0].obs_dim
+        self.action_dim = self.envs[0].action_dim
 
+    def reset(self):
+        obs_list, infos = [], []
+        for e in self.envs:
+            o, i = e.reset()
+            obs_list.append(o)   # dict，不轉 tensor
+            infos.append(i)
+        return obs_list, infos
+
+    def step(self, actions):
+        obs_list, rewards, dones, truncs, infos = [], [], [], [], []
+        for e, a in zip(self.envs, actions):
+            o, r, d, t, i = e.step(a)
+            obs_list.append(o)   # dict，不轉 tensor
+            rewards.append(torch.as_tensor(r, dtype=torch.float32))
+            dones.append(torch.as_tensor(d, dtype=torch.float32))
+            truncs.append(torch.as_tensor(t, dtype=torch.float32))
+            infos.append(i)
+
+        rewards = torch.stack(rewards)  # [n_envs]
+        dones   = torch.stack(dones)    # [n_envs]
+        truncs  = torch.stack(truncs)   # [n_envs]
+        return obs_list, rewards, dones, truncs, infos
+
+    def close(self):
+        for e in self.envs:
+            e.close()
+
+"""
 def reset_envs(envs, agent):
     obs_list, infos_list = [], []
     for e in envs:
@@ -63,7 +97,7 @@ def step_envs(envs, actions, agent):
 
     # infos 保留 list of dicts
     return next_obs, rewards, dones, truncs, list(infos)
-
+"""
 
 
 def split_infos(infos):
@@ -232,8 +266,12 @@ if __name__ == "__main__":
             qmax_per_trade=qmax_per_trade,
         )
     # 這裡完全不用 SyncVectorEnv / AsyncVectorEnv
-    envs = [make_env() for _ in range(num_envs)]
-    n_envs = len(envs)
+    # envs = [make_env() for _ in range(num_envs)]
+    # n_envs = len(envs)
+
+    envs = TorchVecEnv([make_env() for _ in range(num_envs)])
+    n_envs = envs.num_envs
+
 
     # === 初始化 agent ===
     obs_dim = envs[0].obs_dim
@@ -260,7 +298,10 @@ if __name__ == "__main__":
     try:
         for ep in progress_bar:
             # 等同之前的gym .reset()
-            obs, infos = reset_envs(envs, agent)
+            # obs, infos = reset_envs(envs, agent)
+            obs_dicts, infos = envs.reset()
+            obs = torch.stack([agent.obs_to_tensor(o) for o in obs_dicts])
+
             start_episode_time = time.time()
             start = time.perf_counter()
             for t in range(agent.n_steps):
@@ -275,7 +316,9 @@ if __name__ == "__main__":
 
 
                 # === 執行環境 step ===
-                obs, rewards, dones, truncs, infos = step_envs(envs, actions_tuple, agent)
+                # obs, rewards, dones, truncs, infos = step_envs(envs, actions_tuple, agent)
+                obs_dicts, rewards, dones, truncs, infos = envs.step(actions_tuple)
+                obs = torch.stack([agent.obs_to_tensor(o) for o in obs_dicts])
 
                 # === 存 buffer ===
                 infos_list = split_infos(infos)
