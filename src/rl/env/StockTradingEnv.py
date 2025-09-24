@@ -197,21 +197,7 @@ class StockTradingEnv:
                 floating_ret = (price - avg_cost) / avg_cost if avg_cost > 0 else 0.0
                 hold_info.extend([avg_cost, floating_ret])
         return torch.tensor(hold_info, dtype=torch.float32, device=self.device)
-    """
-    def _make_obs(self, t: int):
-        start = time.time()
 
-        feats = self.features[t - self.K + 1: t + 1]   # [K, N, F]
-        #feats = feats.permute(1, 2, 0)                 # [N, F, K]
-
-        portfolio = self._weights_vector(t)            # [1+N]
-        slot_info = self._slot_info(t)                 # [2*max_holdings]
-
-        return {
-            "features": feats,       # (N, F, K)
-            "portfolio": torch.cat([portfolio, slot_info], dim=0)
-        }
-    """
     def _make_obs(self, t: int):
         feats = self.features[t - self.K + 1 : t + 1]   # [K, N, F]
         feats = torch.as_tensor(feats, dtype=torch.float32)  # 確保是 Tensor
@@ -392,13 +378,5 @@ class StockTradingEnv:
         self._timing_stats["info"] += time.time() - start
 
         self._timing_stats["total"] += time.time() - t_start
-
-        """
-        print("[PROFILE][Episode timing]")
-        total = self._timing_stats["total"]
-        for k, v in self._timing_stats.items():
-            pct = (v / total * 100) if total > 0 else 0.0
-            print(f"  {k:<8}: {v:.4f}s  ({pct:4.1f}%)")
-        """
 
         return obs, reward, terminated, False, info
