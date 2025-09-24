@@ -26,7 +26,6 @@ def run_test_once(actor_path, data_path, config_path,
         full_cfg = yaml.safe_load(f)
 
     env_cfg = full_cfg["environment"]
-    ppo_cfg = full_cfg["ppo"]
     feature_cols = full_cfg["data"]["features"]
 
     # === 載入測試資料 ===
@@ -36,7 +35,7 @@ def run_test_once(actor_path, data_path, config_path,
     ids = sorted(df["stock_id"].unique())
 
     # === 初始化環境 ===
-    envs = StockTradingEnv(
+    env = StockTradingEnv(
         df=df,
         stock_ids=ids,
         lookback=env_cfg["lookback"],
@@ -45,11 +44,11 @@ def run_test_once(actor_path, data_path, config_path,
         qmax_per_trade=env_cfg["qmax_per_trade"],
     )
 
-    obs, info = envs.reset()
-    obs_dim = envs.obs_dim
+    obs, info = env.reset()
+    obs_dim = env.obs_dim
 
     # === 建立 PPO Agent ===
-    agent = PPOAgent(None, len(ids), envs.QMAX, full_cfg)
+    agent = PPOAgent(obs_dim, len(ids), env.QMAX, full_cfg)
 
     # === 載入已訓練好的 actor 參數 ===
     if full_cfg["training"].get("load_checkpoint", True) and actor_path is not None and os.path.exists(actor_path):
@@ -65,8 +64,6 @@ def run_test_once(actor_path, data_path, config_path,
             print(f"[WARN] Failed to load checkpoint: {e}. Using random init.")
     else:
         print("[INFO] No checkpoint found or load_checkpoint=False. Using random init.")
-        pass
-
 
     # === 測試 loop ===
     dates, values, actions = [], [], []
@@ -74,16 +71,14 @@ def run_test_once(actor_path, data_path, config_path,
 
     while not terminated:
         with torch.no_grad():
-            
-            obs_t = agent.obs_to_tensor(obs).unsqueeze(0)
-
+            obs_t = agent.obs_to_tensor(obs).unsqueeze(0)  # [1,obs_dim]
             mask_flat = agent.flatten_mask(info["action_mask_3d"]).unsqueeze(0)
             logits = agent.actor(obs_t)
             masked_logits = logits.masked_fill(~mask_flat, -1e9)
             a_flat = torch.argmax(masked_logits, dim=-1).item()
             action_tuple = agent.flat_to_tuple(a_flat)
 
-        obs, reward, terminated, _, info = envs.step(action_tuple)
+        obs, reward, terminated, _, info = env.step(action_tuple)
 
         dates.append(info["date"])
         values.append(info["V"])
@@ -103,8 +98,8 @@ def run_test_once(actor_path, data_path, config_path,
         print(f"[TEST-{tag}] Total Return: {total_return:.2%}, Max Drawdown: {max_drawdown:.2%}")
 
     # === baseline 計算 ===
-    baseline_value = (envs.baseline_close / envs.baseline_close[envs.K]) * envs.initial_cash
-    df_baseline = pd.DataFrame({"date": envs.dates[envs.K:], "baseline": baseline_value[envs.K:]})
+    baseline_value = (env.baseline_close / env.baseline_close[env.K]) * env.initial_cash
+    df_baseline = pd.DataFrame({"date": env.dates[env.K:], "baseline": baseline_value[env.K:].cpu().numpy()})
     df_baseline["date"] = pd.to_datetime(df_baseline["date"])
     df_baseline.set_index("date", inplace=True)
 
@@ -118,7 +113,7 @@ def run_test_once(actor_path, data_path, config_path,
         plt.ylabel("Value")
         plt.legend()
         plt.grid(True)
-        #plt.show()
+        plt.show()
 
     # === 輸出交易紀錄 ===
     if save_trades:
@@ -128,6 +123,7 @@ def run_test_once(actor_path, data_path, config_path,
         df_trades.to_csv(out_path, index=False)
 
     return total_return, max_drawdown, df_perf, df_baseline
+
 
 # === 主程式（獨立跑測試用） ===
 if __name__ == "__main__":
@@ -154,5 +150,3 @@ if __name__ == "__main__":
         tag="2020",
         verbose=True,
     )
-
-

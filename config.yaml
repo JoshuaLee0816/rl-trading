@@ -49,7 +49,7 @@ logging:
   save_summary: false       # 是否存 summary.csv
   save_trades: false        # 是否存 trades_all.csv（目前未用）
   trade_sample_freq: 1      # 每幾筆交易存一次（寫入 RunLogger）
-  wandb_every: 1            # 每幾個 episode 紀錄一次到 W&B
+  wandb_every: 10            # 每幾個 episode 紀錄一次到 W&B
 
 ppo:
   # 執行設備與並行
@@ -73,4 +73,4 @@ ppo:
 
   # 網路結構
   actor_hidden: 32
-  critic_hidden: 16
+  critic_hidden: 32
