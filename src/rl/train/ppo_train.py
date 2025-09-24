@@ -37,10 +37,7 @@ if str(SRC_DIR) not in sys.path:
 # === 模組 ===
 from rl.models.ppo_agent import PPOAgent
 from rl.env.StockTradingEnv import StockTradingEnv
-# 你的專案如有 logger/test 模組，仍可保留；此處僅保證訓練必需能跑
-# from rl.train.logger import RunLogger
-# from rl.test.ppo_test import run_test_once
-
+from rl.test.ppo_test import run_test_suite  # ← 新增：訓練中呼叫測試
 
 # --------- 小工具 ----------
 def split_infos(infos):
@@ -115,6 +112,7 @@ if __name__ == "__main__":
     upload_wandb = bool(train_cfg.get("upload_wandb", False))
     num_envs     = int(ppo_cfg.get("num_envs", 2))
     wandb_every  = int(log_cfg.get("wandb_every", 10))
+    test_every   = int(log_cfg.get("test_every", train_cfg.get("test_every", 10)))  # ← 新增
 
     init_cash      = env_cfg["initial_cash"]
     lookback       = env_cfg["lookback"]
@@ -128,7 +126,7 @@ if __name__ == "__main__":
     if upload_wandb:
         wandb.init(project="rl-trading", name=f"run_{run_id}", job_type="train", config=ppo_cfg)
 
-    outdir = ROOT / log_cfg.get("outdir", "runs")
+    outdir = ROOT / log_cfg.get("outdir", "logs/runs")
     run_dir = outdir / f"run_{run_id}"
     run_dir.mkdir(parents=True, exist_ok=True)
     with open(run_dir / "config.yaml", "w", encoding="utf-8") as f:
@@ -206,6 +204,10 @@ if __name__ == "__main__":
             obs = agent.obs_to_tensor(obs_nd)               # → Tensor (n_envs, obs_dim)
             infos_list = split_infos(infos)                 # list[dict] (n_envs)
 
+            # 以每個 env 的初始資產 V 當作報酬基準
+            prev_V = torch.tensor([i["V"] for i in infos_list], dtype=torch.float32)
+            daily_returns = []   # 這個 outer-episode 期間的日對數報酬（每步 append 一次）
+
             start = time.perf_counter()
             for t in range(agent.n_steps):
                 # 取出各環境的 action mask
@@ -223,6 +225,12 @@ if __name__ == "__main__":
                 obs_nd, rewards, dones, truncs, infos = envs.step(actions_np)
                 obs = agent.obs_to_tensor(obs_nd)
                 infos_list = split_infos(infos)
+
+                # 用資產淨值 V 計算本步日對數報酬，並累積
+                cur_V = torch.tensor([i["V"] for i in infos_list], dtype=torch.float32)  # shape: (n_envs,)
+                log_ret = torch.log(cur_V / (prev_V + 1e-8))                             # 避免除 0
+                daily_returns.append(log_ret.detach().cpu())
+                prev_V = cur_V
 
                 # 存入 buffer（逐環境）
                 for i in range(n_envs):
@@ -242,13 +250,18 @@ if __name__ == "__main__":
             # 更新 PPO
             agent.update()
 
+            # 依累積的 daily_returns 計算年化
+            metrics = compute_episode_metrics(daily_returns)
+            print(f"[EP {ep}] days={metrics['days']} total_return={metrics['total_return']:.4f} "
+                  f"annualized={metrics['annualized_pct']:.2f}%")
+
             # 簡單存檢查點（可關掉）
             total_ep = ep * n_envs
             if total_ep % ckpt_freq == 0:
                 ckpt_path = save_checkpoint(run_dir, agent, ep)
                 prune_checkpoints(run_dir, max_ckpts)
 
-            # W&B 簡易紀錄
+            # W&B 基本紀錄
             if upload_wandb and (ep % max(1, wandb_every) == 0):
                 wandb.log({
                     "train/episode_outer": ep,
@@ -256,7 +269,49 @@ if __name__ == "__main__":
                     "train/actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
                     "train/critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
                     "train/entropy": agent.entropy_log[-1] if agent.entropy_log else None,
+                    "eval/days": int(metrics["days"]),
+                    "eval/total_return": float(metrics["total_return"]),
+                    "eval/annualized_pct": float(metrics["annualized_pct"]),
                 }, step=total_ep)
+
+            # === 每 test_every 個 outer-episode 跑一次 5 年測試並上傳到 W&B ===
+            if upload_wandb and (ep % max(1, test_every) == 0):
+                # 保存當前權重作為評測快照
+                tmp_ckpt = run_dir / f"eval_tmp_ep{ep}.pt"
+                torch.save({"actor": agent.actor.state_dict(),
+                            "critic": agent.critic.state_dict()}, tmp_ckpt)
+
+                years = (2020, 2021, 2022, 2023, 2024)
+                results = run_test_suite(
+                    actor_path=tmp_ckpt,
+                    config_path=ROOT / "config.yaml",
+                    years=years,
+                    plot=True,
+                    save_trades=False,
+                    verbose=True,
+                )
+
+                if len(results) == 0:
+                    print("[WARN] run_test_suite 沒有任何年份成功（多半是找不到測試檔）。不上傳圖。")
+                else:
+                    log_dict = {}
+                    panel_imgs = []
+                    for y in years:
+                        if y not in results:
+                            continue
+                        r = results[y]
+                        # 指標
+                        log_dict[f"test/{y}/total_return"] = float(r["total_return"])
+                        log_dict[f"test/{y}/max_drawdown"] = float(r["max_drawdown"])
+                        # 圖片（單獨與面板）
+                        if r["fig"] is not None:
+                            img = wandb.Image(r["fig"], caption=f"{y}")
+                            log_dict[f"test/fig/{y}"] = img
+                            panel_imgs.append(img)
+                            plt.close(r["fig"])  # 釋放記憶體
+                    if panel_imgs:
+                        log_dict["test/panel"] = panel_imgs  # W&B 會顯示成一組圖片
+                    wandb.log(log_dict, step=total_ep)
 
     finally:
         try:

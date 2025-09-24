@@ -1,60 +1,67 @@
 training:
   model: "ppo"              # 控制哪個 model 執行
-  n_episodes: 2000         # 總訓練集數
+  n_episodes: 2000          # 總訓練集數
   seed: 42                  # 隨機種子
-  upload_wandb: false        # 要不要上傳到 W&B
-  ckpt_freq: 100             # 每多少 episodes 存一次 checkpoint
+  upload_wandb: true        # 要不要上傳到 W&B
+  ckpt_freq: 100            # 每多少 episodes 存一次 checkpoint
   max_ckpts: 5              # 最多保留的 checkpoint 數
-  load_checkpoint: true    # 是否從檢查點載入（未用）
-  
+  load_checkpoint: true     # 是否從檢查點載入（未用）
+
   # 以下目前未在 src/rl/train/ppo_train.py 使用（保留以後擴充）
   save_freq: 5              # 每幾集更新一次圖（目前未用）
   update_every: 256         # 每幾步更新一次（未用）
   warmup_steps: 10000       # 開始更新前先收集步數（未用）
   grad_steps: 1             # 每次觸發連續更新幾次（未用）
-  
 
 model:
   encoder:
-    type: "temporal_transformer"        # "identity"(不做變化) | "temporal_transformer"(啟用transformer self-attention) Actor /Critic 前state要不要經過一個encoder
+    type: "temporal_transformer"   # "identity" | "temporal_transformer"
     params:
-      d_model: 2           # Transformer 隱藏維度(每檔最後輸出的向量長度)
-      n_heads: 1            # 分成幾個head關注
-      n_layers: 1           # Transformer Encoder 疊幾層 => 每層 = self-attention + FFN + 殘差
-      dropout: 0.1          # 每層的dropout rate
-      k_window: 10          # 要和Training pipeline對齊?
-  n_anchor: 0               # 直通特徵的維度數，不經過transformer的部分
+      d_model: 16
+      n_heads: 2
+      n_layers: 1
+      dropout: 0.1
+      k_window: 15
+  n_anchor: 0
 
 data:
-  # file: "stocks_20_with_market_index_2015-2020_long.parquet"
-  file: "full_300/walk_forward/WF_train_2015_2019_full_300.parquet"  # 資料檔路徑
+  file: "full_300/walk_forward/WF_train_2015_2019_full_300.parquet"
+  # 單一測試檔仍可用（部分工具會讀這個）
   test_file: "full_300/walk_forward/WF_test_2020_full_300.parquet"
+  # 新增：多年份測試檔（ppo_test 會優先找這個）
+  test_files:
+    "2020": "full_300/walk_forward/WF_test_2020_full_300.parquet"
+    "2021": "full_300/walk_forward/WF_test_2021_full_300.parquet"
+    "2022": "full_300/walk_forward/WF_test_2022_full_300.parquet"
+    "2023": "full_300/walk_forward/WF_test_2023_full_300.parquet"
+    "2024": "full_300/walk_forward/WF_test_2024_full_300.parquet"
   features: ["open", "high", "low", "close", "volume", "MA5", "MA34", "MA60", "VMA20", "VMA60", "rsi14"]
-  #features: ['open', 'high', 'low', 'close', 'volume', 'cash_dividend', 'stock_dividend', 'MA5', 'MA20', 'MA34', 'MA60', 'MA120', 'VMA20', 'VMA60', 'rsi14', 'macd', 'macd_signal', 'macd_hist']  # 要保留的特徵
+  # features: ['open','high','low','close','volume','cash_dividend','stock_dividend','MA5','MA20','MA34','MA60','MA120','VMA20','VMA60','rsi14','macd','macd_signal','macd_hist']
 
 safety:
-  cool_down_every: 500      # 每多少 episodes 強制休息（目前未用）
-  sleep_seconds: 120        # 休息秒數（目前未用）
+  cool_down_every: 500
+  sleep_seconds: 120
 
 environment:
-  initial_cash: 100000      # 初始資金
-  lookback: 10              # 向前看的天數
+  initial_cash: 100000
+  lookback: 15
   reward_mode: "daily_return"   # "daily_return" | "total_profit"
-  action_mode: "discrete"   # 動作模式
-  max_holdings: 3           # 最多同時持有幾檔
-  qmax_per_trade: 10        # 單檔單次最大交易張數
+  action_mode: "discrete"
+  max_holdings: 3
+  qmax_per_trade: 10
 
 logging:
-  outdir: "logs/runs"       # 輸出目錄
-  save_summary: false       # 是否存 summary.csv
-  save_trades: false        # 是否存 trades_all.csv（目前未用）
-  trade_sample_freq: 1      # 每幾筆交易存一次（寫入 RunLogger）
-  wandb_every: 10            # 每幾個 episode 紀錄一次到 W&B
+  outdir: "logs/runs"
+  save_summary: false
+  save_trades: false
+  trade_sample_freq: 1
+  wandb_every: 1
+  test_every: 1                 # ← 新增：每 10 個 outer-episode 跑一次 2020–2024 測試
 
 ppo:
   # 執行設備與並行
-  device: "mps"
-  num_envs: 2
+  device: "mps"                  # mac 上會用 MPS；Windows/無 MPS 會自動 fallback 到 CPU
+  num_envs: 4
   use_subproc: false
 
   # 演算法超參數
@@ -69,8 +76,8 @@ ppo:
   critic_lr: 0.00003
   batch_size: 256
   n_steps: 512
-  epochs: 3                 # 每次 update 的 epoch 數
+  epochs: 3
 
   # 網路結構
-  actor_hidden: 32
-  critic_hidden: 32
+  actor_hidden: 128
+  critic_hidden: 64

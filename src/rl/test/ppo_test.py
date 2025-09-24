@@ -4,6 +4,8 @@ import sys
 import yaml
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")  # 訓練中評測避免 block GUI
 import matplotlib.pyplot as plt
 from pathlib import Path
 
@@ -19,8 +21,8 @@ from rl.models.ppo_agent import PPOAgent
 
 
 def run_test_once(actor_path, data_path, config_path,
-                  plot=True, save_trades=False, tag="2020", verbose=True):
-
+                  plot=True, save_trades=False, tag="2020", verbose=True,
+                  return_fig=False):
     # === 載入 config.yaml ===
     with open(config_path, "r", encoding="utf-8") as f:
         full_cfg = yaml.safe_load(f)
@@ -29,12 +31,15 @@ def run_test_once(actor_path, data_path, config_path,
     feature_cols = full_cfg["data"]["features"]
 
     # === 載入測試資料 ===
-    df = pd.read_parquet(data_path) if str(data_path).endswith(".parquet") else pd.read_csv(data_path)
+    if str(data_path).endswith(".parquet"):
+        df = pd.read_parquet(data_path)
+    else:
+        df = pd.read_csv(data_path, parse_dates=["date"])
     keep_cols = ["date", "stock_id"] + feature_cols
     df = df[keep_cols]
     ids = sorted(df["stock_id"].unique())
 
-    # === 初始化環境 ===
+    # === 初始化環境（CPU） ===
     env = StockTradingEnv(
         df=df,
         stock_ids=ids,
@@ -42,6 +47,7 @@ def run_test_once(actor_path, data_path, config_path,
         initial_cash=env_cfg["initial_cash"],
         max_holdings=env_cfg["max_holdings"],
         qmax_per_trade=env_cfg["qmax_per_trade"],
+        device="cpu",
     )
 
     obs, info = env.reset()
@@ -54,18 +60,20 @@ def run_test_once(actor_path, data_path, config_path,
     if full_cfg["training"].get("load_checkpoint", True) and actor_path is not None and os.path.exists(actor_path):
         try:
             ckpt = torch.load(actor_path, map_location=agent.device)
-            if "actor" in ckpt:
+            if isinstance(ckpt, dict) and "actor" in ckpt:
                 agent.actor.load_state_dict(ckpt["actor"])
             else:
                 agent.actor.load_state_dict(ckpt)
             agent.actor.eval()
-            print(f"[INFO] Loaded checkpoint from {actor_path}")
+            if verbose:
+                print(f"[INFO] Loaded checkpoint from {actor_path}")
         except Exception as e:
             print(f"[WARN] Failed to load checkpoint: {e}. Using random init.")
     else:
-        print("[INFO] No checkpoint found or load_checkpoint=False. Using random init.")
+        if verbose:
+            print("[INFO] No checkpoint found or load_checkpoint=False. Using random init.")
 
-    # === 測試 loop ===
+    # === 測試 loop（argmax policy） ===
     dates, values, actions = [], [], []
     terminated = False
 
@@ -97,15 +105,16 @@ def run_test_once(actor_path, data_path, config_path,
     if verbose:
         print(f"[TEST-{tag}] Total Return: {total_return:.2%}, Max Drawdown: {max_drawdown:.2%}")
 
-    # === baseline 計算 ===
+    # === baseline（0050） ===
     baseline_value = (env.baseline_close / env.baseline_close[env.K]) * env.initial_cash
     df_baseline = pd.DataFrame({"date": env.dates[env.K:], "baseline": baseline_value[env.K:].cpu().numpy()})
     df_baseline["date"] = pd.to_datetime(df_baseline["date"])
     df_baseline.set_index("date", inplace=True)
 
     # === 繪圖 ===
+    fig = None
     if plot:
-        plt.figure(figsize=(10, 6))
+        fig = plt.figure(figsize=(10, 6))
         plt.plot(df_perf.index, df_perf["value"], label="Agent Portfolio")
         plt.plot(df_baseline.index, df_baseline["baseline"], label="Baseline (0050)", linestyle="--")
         plt.title(f"Portfolio Value Over Time ({tag})")
@@ -113,40 +122,84 @@ def run_test_once(actor_path, data_path, config_path,
         plt.ylabel("Value")
         plt.legend()
         plt.grid(True)
-        plt.show()
+        # 不呼叫 plt.show()；由訓練端或主程式自行處理
 
-    # === 輸出交易紀錄 ===
+    # === 交易紀錄 ===
     if save_trades:
         out_path = Path("src/rl/test/testing_output") / f"trades_{tag}.csv"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         df_trades = pd.DataFrame(actions, columns=["date", "side", "stock_id", "lots", "cash", "value"])
         df_trades.to_csv(out_path, index=False)
 
-    return total_return, max_drawdown, df_perf, df_baseline
+    if return_fig:
+        return total_return, max_drawdown, df_perf, df_baseline, fig
+    else:
+        return total_return, max_drawdown, df_perf, df_baseline
 
 
-# === 主程式（獨立跑測試用） ===
+def _resolve_test_path(root: Path, cfg: dict, year: int) -> Path:
+    """
+    支援兩種設定：
+    1) cfg["data"]["test_files"] = {"2020":"...", ...}
+    2) fallback pattern: data/processed/test_{year}.parquet 或 .csv
+    """
+    data_cfg = cfg.get("data", {})
+    test_files = data_cfg.get("test_files")
+    if isinstance(test_files, dict) and str(year) in test_files:
+        return root / "data" / "processed" / test_files[str(year)]
+    # fallback pattern
+    p_parquet = root / "data" / "processed" / f"test_{year}.parquet"
+    p_csv     = root / "data" / "processed" / f"test_{year}.csv"
+    return p_parquet if p_parquet.exists() else p_csv
+
+
+def run_test_suite(actor_path: Path, config_path: Path, years=(2020, 2021, 2022, 2023, 2024),
+                   plot=True, save_trades=False, verbose=True):
+    """
+    依序跑多個年份測試；回傳 dict:
+      results[year] = {"total_return":..., "max_drawdown":..., "fig": matplotlib.figure.Figure}
+    """
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+
+    results = {}
+    for y in years:
+        data_path = _resolve_test_path(ROOT, cfg, y)
+        if not data_path.exists():
+            if verbose:
+                print(f"[WARN] Test data not found for {y}: {data_path}")
+            continue
+        tr, mdd, _, _, fig = run_test_once(
+            actor_path=str(actor_path),
+            data_path=str(data_path),
+            config_path=str(config_path),
+            plot=plot,
+            save_trades=save_trades,
+            tag=str(y),
+            verbose=verbose,
+            return_fig=True,
+        )
+        results[y] = {"total_return": tr, "max_drawdown": mdd, "fig": fig}
+    return results
+
+
+# === 獨立執行 ===
 if __name__ == "__main__":
+    # 取最後一次 run 的權重
     run_dirs = sorted((ROOT / "logs" / "runs").glob("run_*"))
     latest_run = run_dirs[-1]
     ACTOR_PATH = latest_run / "ppo_actor.pt"
-
     CONFIG_PATH = ROOT / "config.yaml"
 
-    # 從 config.yaml 讀取測試資料路徑
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-    DATA_PATH = ROOT / "data" / "processed" / cfg["data"]["test_file"]
+
+    YEARS = (2020, 2021, 2022, 2023, 2024)
 
     print(f"[INFO] Using actor checkpoint: {ACTOR_PATH}")
-    print(f"[INFO] Using test dataset: {DATA_PATH}")
+    print(f"[INFO] Years: {YEARS}")
 
-    run_test_once(
-        actor_path=ACTOR_PATH,
-        data_path=DATA_PATH,
-        config_path=CONFIG_PATH,
-        plot=True,
-        save_trades=True,
-        tag="2020",
-        verbose=True,
-    )
+    results = run_test_suite(ACTOR_PATH, CONFIG_PATH, years=YEARS, plot=True, save_trades=True, verbose=True)
+    for y, r in results.items():
+        print(f"[{y}] TR={r['total_return']:.2%}, MDD={r['max_drawdown']:.2%}")
+    plt.show()
