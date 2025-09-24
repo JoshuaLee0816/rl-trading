@@ -240,7 +240,7 @@ if __name__ == "__main__":
     action_dim = envs[0].action_dim
 
     agent = PPOAgent(
-        obs_dim=None,
+        obs_dim= obs_dim,
         num_stocks=num_stocks,
         qmax_per_trade=qmax_per_trade,
         config=config,

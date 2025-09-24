@@ -18,8 +18,8 @@ model:
   encoder:
     type: "identity"        # "identity"(不做變化) | "temporal_transformer"(啟用transformer self-attention) Actor /Critic 前state要不要經過一個encoder
     params:
-      d_model: 16           # Transformer 隱藏維度(每檔最後輸出的向量長度)
-      n_heads: 2            # 分成幾個head關注
+      d_model: 2           # Transformer 隱藏維度(每檔最後輸出的向量長度)
+      n_heads: 1            # 分成幾個head關注
       n_layers: 1           # Transformer Encoder 疊幾層 => 每層 = self-attention + FFN + 殘差
       dropout: 0.1          # 每層的dropout rate
       k_window: 15          # 要和Training pipeline對齊?
@@ -38,7 +38,7 @@ safety:
 
 environment:
   initial_cash: 100000      # 初始資金
-  lookback: 15              # 向前看的天數
+  lookback: 2              # 向前看的天數
   reward_mode: "daily_return"   # "daily_return" | "total_profit"
   action_mode: "discrete"   # 動作模式
   max_holdings: 3           # 最多同時持有幾檔
@@ -72,5 +72,5 @@ ppo:
   epochs: 3                 # 每次 update 的 epoch 數
 
   # 網路結構
-  actor_hidden: 128
-  critic_hidden: 64
+  actor_hidden: 32
+  critic_hidden: 16
