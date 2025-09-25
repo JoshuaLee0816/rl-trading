@@ -61,7 +61,7 @@ logging:
 ppo:
   # 執行設備與並行
   device: "mps"                  # mac 上會用 MPS；Windows/無 MPS 會自動 fallback 到 CPU
-  num_envs: 4
+  num_envs: 2
   use_subproc: false
 
   # 演算法超參數

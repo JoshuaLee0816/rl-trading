@@ -300,7 +300,7 @@ if __name__ == "__main__":
                     config_path=ROOT / "config.yaml",
                     years=years,
                     plot=True,
-                    save_trades=False,
+                    save_trades=True,
                     verbose=True,
                 )
 

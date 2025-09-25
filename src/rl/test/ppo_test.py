@@ -117,6 +117,21 @@ def run_test_once(actor_path, data_path, config_path,
         fig = plt.figure(figsize=(10, 6))
         plt.plot(df_perf.index, df_perf["value"], label="Agent Portfolio")
         plt.plot(df_baseline.index, df_baseline["baseline"], label="Baseline (0050)", linestyle="--")
+        # === 加交易標記 ===
+        if len(actions) > 0:   # 這裡直接用 actions
+            df_trades = pd.DataFrame(actions, columns=["date", "side", "stock_id", "lots", "cash", "value"])
+            df_trades["date"] = pd.to_datetime(df_trades["date"])
+
+            # 買點 (Buy) → 綠色三角形
+            buy_points = df_trades[df_trades["side"] == "BUY"]
+            plt.scatter(buy_points["date"], buy_points["value"], 
+                        marker="^", color="green", s=80, label="Buy")
+
+            # 賣點 (Sell) → 紅色倒三角
+            sell_points = df_trades[df_trades["side"] == "SELL_ALL"]
+            plt.scatter(sell_points["date"], sell_points["value"], 
+                        marker="v", color="red", s=80, label="Sell")
+            
         plt.title(f"Portfolio Value Over Time ({tag})")
         plt.xlabel("Date")
         plt.ylabel("Value")
@@ -131,10 +146,17 @@ def run_test_once(actor_path, data_path, config_path,
         df_trades = pd.DataFrame(actions, columns=["date", "side", "stock_id", "lots", "cash", "value"])
         df_trades.to_csv(out_path, index=False)
 
+    # <<< 修改：在 save_trades=True 時，多回傳 trades
     if return_fig:
-        return total_return, max_drawdown, df_perf, df_baseline, fig
+        if save_trades:
+            return total_return, max_drawdown, df_perf, df_baseline, fig, actions   # <<< 修改
+        else:
+            return total_return, max_drawdown, df_perf, df_baseline, fig
     else:
-        return total_return, max_drawdown, df_perf, df_baseline
+        if save_trades:
+            return total_return, max_drawdown, df_perf, df_baseline, actions        # <<< 修改
+        else:
+            return total_return, max_drawdown, df_perf, df_baseline
 
 
 def _resolve_test_path(root: Path, cfg: dict, year: int) -> Path:
@@ -152,16 +174,76 @@ def _resolve_test_path(root: Path, cfg: dict, year: int) -> Path:
     p_csv     = root / "data" / "processed" / f"test_{year}.csv"
     return p_parquet if p_parquet.exists() else p_csv
 
-
 def run_test_suite(actor_path: Path, config_path: Path, years=(2020, 2021, 2022, 2023, 2024),
                    plot=True, save_trades=False, verbose=True):
     """
     依序跑多個年份測試；回傳 dict:
-      results[year] = {"total_return":..., "max_drawdown":..., "fig": matplotlib.figure.Figure}
+      results[year] = {
+          "total_return": float,
+          "max_drawdown": float,
+          "fig": matplotlib.figure.Figure,
+          "trades": list[dict] | None
+      }
     """
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
+    results = {}
+    for y in years:
+        data_path = _resolve_test_path(ROOT, cfg, y)
+        if not data_path.exists():
+            if verbose:
+                print(f"[WARN] Test data not found for {y}: {data_path}")
+            continue
+
+        # <<< 修改：接收 trades
+        if save_trades:
+            tr, mdd, _, _, fig, trades = run_test_once(
+                actor_path=str(actor_path),
+                data_path=str(data_path),
+                config_path=str(config_path),
+                plot=plot,
+                save_trades=save_trades,
+                tag=str(y),
+                verbose=verbose,
+                return_fig=True,
+            )
+            results[y] = {
+                "total_return": tr,
+                "max_drawdown": mdd,
+                "fig": fig,
+                "trades": trades,   # <<< 修改
+            }
+        else:
+            tr, mdd, _, _, fig = run_test_once(
+                actor_path=str(actor_path),
+                data_path=str(data_path),
+                config_path=str(config_path),
+                plot=plot,
+                save_trades=save_trades,
+                tag=str(y),
+                verbose=verbose,
+                return_fig=True,
+            )
+            results[y] = {
+                "total_return": tr,
+                "max_drawdown": mdd,
+                "fig": fig,
+                "trades": None,    # <<< 修改：保持欄位一致
+            }
+
+    return results
+
+"""
+def run_test_suite(actor_path: Path, config_path: Path, years=(2020, 2021, 2022, 2023, 2024),
+                   plot=True, save_trades=False, verbose=True):
+    
+    #依序跑多個年份測試；回傳 dict:
+      #results[year] = {"total_return":..., "max_drawdown":..., "fig": matplotlib.figure.Figure}
+    
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    
     results = {}
     for y in years:
         data_path = _resolve_test_path(ROOT, cfg, y)
@@ -181,7 +263,7 @@ def run_test_suite(actor_path: Path, config_path: Path, years=(2020, 2021, 2022,
         )
         results[y] = {"total_return": tr, "max_drawdown": mdd, "fig": fig}
     return results
-
+"""
 
 # === 獨立執行 ===
 if __name__ == "__main__":
