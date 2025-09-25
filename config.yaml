@@ -56,28 +56,28 @@ logging:
   save_trades: false
   trade_sample_freq: 1
   wandb_every: 1
-  test_every: 1                 # ← 新增：每 10 個 outer-episode 跑一次 2020–2024 測試
+  test_every: 10                 # ← 新增：每 10 個 outer-episode 跑一次 2020–2024 測試
 
 ppo:
   # 執行設備與並行
   device: "mps"                  # mac 上會用 MPS；Windows/無 MPS 會自動 fallback 到 CPU
-  num_envs: 2
+  num_envs: 4
   use_subproc: false
 
   # 演算法超參數
   gamma: 0.998
   gae_lambda: 0.95
   clip_epsilon: 0.2
-  entropy_coef: 0.1
+  entropy_coef: 0.05
   value_coef: 0.5
 
   # 最佳化與批次
-  actor_lr: 0.00001
-  critic_lr: 0.00003
+  actor_lr: 0.0003
+  critic_lr: 0.001
   batch_size: 256
   n_steps: 512
   epochs: 3
 
-  # 網路結構
-  actor_hidden: 128
+  # 網路結構 我假設兩個神經網路都先做兩層 如果不行再改成三層hidden layer
+  actor_hidden: 64
   critic_hidden: 64

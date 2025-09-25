@@ -112,7 +112,7 @@ if __name__ == "__main__":
     upload_wandb = bool(train_cfg.get("upload_wandb", False))
     num_envs     = int(ppo_cfg.get("num_envs", 2))
     wandb_every  = int(log_cfg.get("wandb_every", 10))
-    test_every   = int(log_cfg.get("test_every", train_cfg.get("test_every", 10)))  # ← 新增
+    test_every   = int(log_cfg.get("test_every", train_cfg.get("test_every", 10)))
 
     init_cash      = env_cfg["initial_cash"]
     lookback       = env_cfg["lookback"]
@@ -197,83 +197,69 @@ if __name__ == "__main__":
     # 進度條：總回合 = 外層集數 * 環境數
     progress_bar = trange(1, n_episodes * n_envs + 1, unit="episode", unit_scale=n_envs)
 
+    # <<< 新增：只保留最近 10 次完整 test 結果 >>>
+    recent_test_logs = deque(maxlen=10)
+
     try:
         for ep in progress_bar:
             # reset
-            obs_nd, infos = envs.reset()                    # obs_nd: (n_envs, obs_dim)
-            obs = agent.obs_to_tensor(obs_nd)               # → Tensor (n_envs, obs_dim)
-            infos_list = split_infos(infos)                 # list[dict] (n_envs)
+            obs_nd, infos = envs.reset()
+            obs = agent.obs_to_tensor(obs_nd)
+            infos_list = split_infos(infos)
 
-            # 以每個 env 的初始資產 V 當作報酬基準
             prev_V = torch.tensor([i["V"] for i in infos_list], dtype=torch.float32)
-            daily_returns = []   # 這個 outer-episode 期間的日對數報酬（每步 append 一次）
-            ep_trade_counts = [0 for _ in range(n_envs)]   # 初始化交易次數
+            daily_returns = []
+            ep_trade_counts = [0 for _ in range(n_envs)]
 
             start = time.perf_counter()
             for t in range(agent.n_steps):
-                # 取出各環境的 action mask
                 mask_batch = [i.get("action_mask_3d", None) for i in infos_list]
-
-                # 選動作（批次）
                 actions_tuple, actions_flat, logps, values, obs_batch, mask_batch_t = agent.select_action(
                     obs, mask_batch
                 )
-
-                # 轉成 (n_envs, 3) int64 給 AsyncVectorEnv
                 actions_np = np.asarray(actions_tuple, dtype=np.int64)
-
-                # step
                 obs_nd, rewards, dones, truncs, infos = envs.step(actions_np)
                 obs = agent.obs_to_tensor(obs_nd)
                 infos_list = split_infos(infos)
 
-                # 累積 trade_count
-                for i in range(n_envs):                       
-                    if "trade_count" in infos_list[i]:        
-                        ep_trade_counts[i] += infos_list[i]["trade_count"]  
+                for i in range(n_envs):
+                    if "trade_count" in infos_list[i]:
+                        ep_trade_counts[i] += infos_list[i]["trade_count"]
 
-                # 用資產淨值 V 計算本步日對數報酬，並累積
-                cur_V = torch.tensor([i["V"] for i in infos_list], dtype=torch.float32)  # shape: (n_envs,)
-                log_ret = torch.log(cur_V / (prev_V + 1e-8))                             # 避免除 0
+                cur_V = torch.tensor([i["V"] for i in infos_list], dtype=torch.float32)
+                log_ret = torch.log(cur_V / (prev_V + 1e-8))
                 daily_returns.append(log_ret.detach().cpu())
                 prev_V = cur_V
 
-                # 存入 buffer（逐環境）
                 for i in range(n_envs):
                     agent.store_transition(
-                        obs_batch[i],           # (obs_dim,)
-                        actions_flat[i],        # scalar index
+                        obs_batch[i],
+                        actions_flat[i],
                         rewards[i],
                         dones[i],
                         logps[i],
                         values[i],
-                        mask_batch_t[i],        # (A,)
+                        mask_batch_t[i],
                     )
 
             end = time.perf_counter()
             print(f"[DEBUG] Rollout (env interaction) 花費 {end - start:.3f} 秒")
 
-            # 更新 PPO
             agent.update()
 
-            # 依累積的 daily_returns 計算年化
             metrics = compute_episode_metrics(daily_returns)
             days = metrics["days"]
-
-            # 直接用最後的 trade_count，而不是逐步累積
-            ep_trade_counts = [i.get("trade_count", 0) for i in infos_list]  
-            avg_trades = float(np.mean(ep_trade_counts)) / days * 252       
+            ep_trade_counts = [i.get("trade_count", 0) for i in infos_list]
+            avg_trades = float(np.mean(ep_trade_counts)) / days * 252
 
             print(f"[EP {ep}] days={metrics['days']} total_return={metrics['total_return']:.4f} "
                   f"annualized={metrics['annualized_pct']:.2f}%")
 
-            # 簡單存檢查點（可關掉）
             total_ep = ep * n_envs
             if total_ep % ckpt_freq == 0:
                 ckpt_path = save_checkpoint(run_dir, agent, ep)
                 prune_checkpoints(run_dir, max_ckpts)
 
-            # W&B 基本紀錄
             if upload_wandb and (ep % max(1, wandb_every) == 0):
                 wandb.log({
                     "train/episode_outer": ep,
@@ -284,12 +270,11 @@ if __name__ == "__main__":
                     "eval/days": int(metrics["days"]),
                     "eval/total_return": float(metrics["total_return"]),
                     "eval/annualized_pct": float(metrics["annualized_pct"]),
-                    "train/avg_trade_count": avg_trades,   # 上傳 avg_trade
+                    "train/avg_trade_count": avg_trades,
                 }, step=total_ep)
 
             # === 每 test_every 個 outer-episode 跑一次 5 年測試並上傳到 W&B ===
             if upload_wandb and (ep % max(1, test_every) == 0):
-                # 保存當前權重作為評測快照
                 tmp_ckpt = run_dir / f"eval_tmp_ep{ep}.pt"
                 torch.save({"actor": agent.actor.state_dict(),
                             "critic": agent.critic.state_dict()}, tmp_ckpt)
@@ -313,18 +298,20 @@ if __name__ == "__main__":
                         if y not in results:
                             continue
                         r = results[y]
-                        # 指標
                         log_dict[f"test/{y}/total_return"] = float(r["total_return"])
                         log_dict[f"test/{y}/max_drawdown"] = float(r["max_drawdown"])
-                        # 圖片（單獨與面板）
                         if r["fig"] is not None:
                             img = wandb.Image(r["fig"], caption=f"{y}")
                             log_dict[f"test/fig/{y}"] = img
                             panel_imgs.append(img)
-                            plt.close(r["fig"])  # 釋放記憶體
+                            plt.close(r["fig"])
                     if panel_imgs:
-                        log_dict["test/panel"] = panel_imgs  # W&B 會顯示成一組圖片
-                    wandb.log(log_dict, step=total_ep)
+                        log_dict["test/panel"] = panel_imgs
+
+                    # <<< 只保留最近 2 次完整 test 結果 >>>
+                    recent_test_logs.append(log_dict)
+                    for d in list(recent_test_logs):
+                        wandb.log(d, step=total_ep)
 
     finally:
         try:
@@ -332,7 +319,6 @@ if __name__ == "__main__":
         except Exception:
             pass
 
-    # 最終存檔
     torch.save(agent.actor.state_dict(), run_dir / "ppo_actor.pt")
     torch.save(agent.critic.state_dict(), run_dir / "ppo_critic.pt")
     if upload_wandb:
