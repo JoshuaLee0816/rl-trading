@@ -207,6 +207,7 @@ if __name__ == "__main__":
             # 以每個 env 的初始資產 V 當作報酬基準
             prev_V = torch.tensor([i["V"] for i in infos_list], dtype=torch.float32)
             daily_returns = []   # 這個 outer-episode 期間的日對數報酬（每步 append 一次）
+            ep_trade_counts = [0 for _ in range(n_envs)]   # 初始化交易次數
 
             start = time.perf_counter()
             for t in range(agent.n_steps):
@@ -225,6 +226,11 @@ if __name__ == "__main__":
                 obs_nd, rewards, dones, truncs, infos = envs.step(actions_np)
                 obs = agent.obs_to_tensor(obs_nd)
                 infos_list = split_infos(infos)
+
+                # 累積 trade_count
+                for i in range(n_envs):                       
+                    if "trade_count" in infos_list[i]:        
+                        ep_trade_counts[i] += infos_list[i]["trade_count"]  
 
                 # 用資產淨值 V 計算本步日對數報酬，並累積
                 cur_V = torch.tensor([i["V"] for i in infos_list], dtype=torch.float32)  # shape: (n_envs,)
@@ -252,6 +258,12 @@ if __name__ == "__main__":
 
             # 依累積的 daily_returns 計算年化
             metrics = compute_episode_metrics(daily_returns)
+            days = metrics["days"]
+
+            # 直接用最後的 trade_count，而不是逐步累積
+            ep_trade_counts = [i.get("trade_count", 0) for i in infos_list]  
+            avg_trades = float(np.mean(ep_trade_counts)) / days * 252       
+
             print(f"[EP {ep}] days={metrics['days']} total_return={metrics['total_return']:.4f} "
                   f"annualized={metrics['annualized_pct']:.2f}%")
 
@@ -272,6 +284,7 @@ if __name__ == "__main__":
                     "eval/days": int(metrics["days"]),
                     "eval/total_return": float(metrics["total_return"]),
                     "eval/annualized_pct": float(metrics["annualized_pct"]),
+                    "train/avg_trade_count": avg_trades,   # 上傳 avg_trade
                 }, step=total_ep)
 
             # === 每 test_every 個 outer-episode 跑一次 5 年測試並上傳到 W&B ===
