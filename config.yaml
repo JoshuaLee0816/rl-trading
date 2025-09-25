@@ -73,7 +73,7 @@ ppo:
 
   # 最佳化與批次
   actor_lr: 0.0003
-  critic_lr: 0.001
+  critic_lr: 0.0005
   batch_size: 256
   n_steps: 512
   epochs: 3
