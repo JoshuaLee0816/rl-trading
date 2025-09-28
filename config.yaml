@@ -3,8 +3,8 @@ training:
   n_episodes: 2000          # 總訓練集數
   seed: 42                  # 隨機種子
   upload_wandb: true        # 要不要上傳到 W&B
-  ckpt_freq: 100            # 每多少 episodes 存一次 checkpoint
-  max_ckpts: 5              # 最多保留的 checkpoint 數
+  ckpt_freq: 200            # 每多少 episodes 存一次 checkpoint
+  max_ckpts: 10              # 最多保留的 checkpoint 數
   load_checkpoint: true     # 是否從檢查點載入（未用）
 
   # 以下目前未在 src/rl/train/ppo_train.py 使用（保留以後擴充）
@@ -19,7 +19,7 @@ model:
     params:
       d_model: 16
       n_heads: 2
-      n_layers: 1
+      n_layers: 2
       dropout: 0.1
       k_window: 15
   n_anchor: 0
@@ -47,16 +47,16 @@ environment:
   lookback: 15
   reward_mode: "daily_return"   # "daily_return" | "total_profit"
   action_mode: "discrete"
-  max_holdings: 3
-  qmax_per_trade: 10
+  max_holdings: 2
+  qmax_per_trade: 30
 
 logging:
   outdir: "logs/runs"
   save_summary: false
   save_trades: false
   trade_sample_freq: 1
-  wandb_every: 1
-  test_every: 10                 # ← 新增：每 10 個 outer-episode 跑一次 2020–2024 測試
+  wandb_every: 5
+  test_every: 100                 # ← 新增：每 10 個 outer-episode 跑一次 2020–2024 測試
 
 ppo:
   # 執行設備與並行
@@ -65,19 +65,19 @@ ppo:
   use_subproc: false
 
   # 演算法超參數
-  gamma: 0.998
+  gamma: 0.99
   gae_lambda: 0.95
   clip_epsilon: 0.2
   entropy_coef: 0.05
   value_coef: 0.5
 
   # 最佳化與批次
-  actor_lr: 0.0003
-  critic_lr: 0.0005
+  actor_lr: 0.0001
+  critic_lr: 0.0003
   batch_size: 256
   n_steps: 512
-  epochs: 3
+  epochs: 2
 
   # 網路結構 我假設兩個神經網路都先做兩層 如果不行再改成三層hidden layer
-  actor_hidden: 64
+  actor_hidden: 128
   critic_hidden: 64
