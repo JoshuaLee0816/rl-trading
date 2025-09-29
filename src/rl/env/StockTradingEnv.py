@@ -174,6 +174,8 @@ class StockTradingEnv(gym.Env):
         self.slots = [None] * self.max_holdings
         self.portfolio_value = torch.tensor(float(self.initial_cash), dtype=torch.float32, device=self.device)
         self.trade_count = 0
+        #  新增：初始化 peak_value
+        self.peak_value = self.portfolio_value.clone()
 
         obs = self._make_obs(self._t)  # numpy array
         action_mask_3d = self._build_action_mask(self._t).detach().cpu().numpy()  # ✅ for AsyncVectorEnv pickling

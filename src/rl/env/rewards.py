@@ -14,6 +14,9 @@ def daily_return(env, action, side, p_close, t):
     V_new = env._mark_to_market(p_close)
     env.portfolio_value = V_new
 
+    # 更新 peak_value
+    env.peak_value = torch.max(env.peak_value, V_new)
+
     portfolio_return = torch.log(
         torch.clamp(V_new, min=1e-12) / torch.clamp(V_prev, min=1e-12)
     )
@@ -40,8 +43,15 @@ def daily_return(env, action, side, p_close, t):
                 penalty += (torch.exp(-5 * floating_ret) - 1) * 0.001
     reward -= penalty
 
+    # === Penalty (MDD懲罰) ===
+    dd_from_peak = (V_new - env.peak_value) / env.peak_value
+    if dd_from_peak < -0.15:  # 超過 -15% 回撤
+        mdd_penalty = dd_from_peak * 0.5  # 懲罰力度可調
+        reward += mdd_penalty
+
     return reward, {
         "baseline_return": float(baseline_return.item()),
+        "mdd": float(dd_from_peak.item())
     }
 # endregion Daily Return
 

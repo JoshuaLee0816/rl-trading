@@ -252,6 +252,10 @@ if __name__ == "__main__":
             ep_trade_counts = [i.get("trade_count", 0) for i in infos_list]
             avg_trades = float(np.mean(ep_trade_counts)) / days * 252
 
+            # check MDD 有沒有學會
+            mdd_list = [i.get("mdd", 0.0) for i in infos_list]
+            ep_mdd = min(mdd_list) * 100  # ← episode 最大回撤 (%)
+
             print(f"[EP {ep}] days={metrics['days']} total_return={metrics['total_return']:.4f} "
                   f"annualized={metrics['annualized_pct']:.2f}%")
 
@@ -271,6 +275,7 @@ if __name__ == "__main__":
                     "eval/total_return": float(metrics["total_return"]),
                     "eval/annualized_pct": float(metrics["annualized_pct"]),
                     "train/avg_trade_count": avg_trades,
+                    "train/mdd": ep_mdd,
                 }, step=total_ep)
 
             # === 每 test_every 個 outer-episode 跑一次 5 年測試並上傳到 W&B ===
