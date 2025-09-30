@@ -102,9 +102,11 @@ def run_test_once(actor_path, data_path, config_path,
     drawdown = df_perf["value"] / roll_max - 1
     max_drawdown = drawdown.min()
 
+    """
     if verbose:
         print(f"[TEST-{tag}] Total Return: {total_return:.2%}, Max Drawdown: {max_drawdown:.2%}")
-
+    """
+    
     # === baseline（0050） ===
     baseline_value = (env.baseline_close / env.baseline_close[env.K]) * env.initial_cash
     df_baseline = pd.DataFrame({"date": env.dates[env.K:], "baseline": baseline_value[env.K:].cpu().numpy()})
@@ -196,8 +198,8 @@ def run_test_suite(actor_path: Path, config_path: Path, years=(2020, 2021, 2022,
                 print(f"[WARN] Test data not found for {y}: {data_path}")
             continue
 
-        # <<< 修改：接收 trades
         if save_trades:
+            # <<< 修改：接收 trades
             tr, mdd, _, _, fig, trades = run_test_once(
                 actor_path=str(actor_path),
                 data_path=str(data_path),
@@ -233,37 +235,6 @@ def run_test_suite(actor_path: Path, config_path: Path, years=(2020, 2021, 2022,
             }
 
     return results
-
-"""
-def run_test_suite(actor_path: Path, config_path: Path, years=(2020, 2021, 2022, 2023, 2024),
-                   plot=True, save_trades=False, verbose=True):
-    
-    #依序跑多個年份測試；回傳 dict:
-      #results[year] = {"total_return":..., "max_drawdown":..., "fig": matplotlib.figure.Figure}
-    
-    with open(config_path, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
-    
-    results = {}
-    for y in years:
-        data_path = _resolve_test_path(ROOT, cfg, y)
-        if not data_path.exists():
-            if verbose:
-                print(f"[WARN] Test data not found for {y}: {data_path}")
-            continue
-        tr, mdd, _, _, fig = run_test_once(
-            actor_path=str(actor_path),
-            data_path=str(data_path),
-            config_path=str(config_path),
-            plot=plot,
-            save_trades=save_trades,
-            tag=str(y),
-            verbose=verbose,
-            return_fig=True,
-        )
-        results[y] = {"total_return": tr, "max_drawdown": mdd, "fig": fig}
-    return results
-"""
 
 # === 獨立執行 ===
 if __name__ == "__main__":

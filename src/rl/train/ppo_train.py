@@ -129,6 +129,8 @@ if __name__ == "__main__":
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     if upload_wandb:
         wandb.init(project="rl-trading", name=f"run_{run_id}", job_type="train", config=ppo_cfg)
+        # 建立固定長度的存放圖表區
+        recent_test_logs = deque(maxlen=max_ckpts)
 
     outdir = ROOT / log_cfg.get("outdir", "logs/runs")
     run_dir = outdir / f"run_{run_id}"
@@ -200,9 +202,6 @@ if __name__ == "__main__":
 
     # 進度條：總回合 = 外層集數 * 環境數
     progress_bar = trange(1, n_episodes * n_envs + 1, unit="episode", unit_scale=n_envs)
-
-    # <<< 新增：只保留最近 10 次完整 test 結果 >>>
-    recent_test_logs = deque(maxlen=10)
 
     try:
         for ep in progress_bar:
@@ -314,16 +313,15 @@ if __name__ == "__main__":
                             panel_imgs.append(img)
                             plt.close(r["fig"])
                     if panel_imgs:
-                        log_dict["test/panel"] = panel_imgs
+                        # slot index 0 ~ max_ckpts-1，覆蓋舊的，最多保留 max_ckpts 組
+                        slot_idx = (ep // test_every) % max_ckpts
+                        log_dict[f"test/panel/slot{slot_idx}"] = panel_imgs
 
-                    # 保留最近 max_ckpts 次 test 結果
+                    # 保留最近 max_ckpts 次 test 結果（本地用）
                     recent_test_logs.append(log_dict)
-                    if len(recent_test_logs) > max_ckpts:
-                        recent_test_logs.pop(0)   # 刪最舊的 pop掉了queue的最前面 解決無限堆疊問題
 
-                    # 只上傳這些（最多 10 個）
-                    for d in recent_test_logs:
-                        wandb.log(d, step=total_ep)
+                    # W&B 一次 log 就好
+                    wandb.log(log_dict, step=total_ep)
 
             # RAM記憶體檢查用
             rss = proc.memory_info().rss / 1024**3  # 常駐記憶體 (GB)

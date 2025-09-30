@@ -29,9 +29,11 @@ class Actor(nn.Module):
 
     def forward(self, x):
         out = self.net(x)  # (B, A)
+        """
         if not hasattr(self, "_printed"):
             print(f"[DEBUG] Actor.forward | input={x.shape} → logits={out.shape}")
             self._printed = True
+        """
         return out
 
 
@@ -45,9 +47,11 @@ class Critic(nn.Module):
         )
     def forward(self, x):
         out = self.net(x).squeeze(-1)  # (B,)
+        """
         if not hasattr(self, "_printed"):
             print(f"[DEBUG] Critic.forward | input={x.shape} → value={out.shape}")
             self._printed = True
+        """
         return out
 
 
