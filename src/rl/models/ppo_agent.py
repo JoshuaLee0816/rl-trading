@@ -299,7 +299,10 @@ class PPOAgent:
             self._printed_update = True
 
         t3 = time.perf_counter()
-        print(f"[PROFILE] buffer={t1-t0:.4f}s, gae={t2-t1:.4f}s, update loop={t3-t2:.4f}s")
+        # print(f"[PROFILE] buffer={t1-t0:.4f}s, gae={t2-t1:.4f}s, update loop={t3-t2:.4f}s")
+
+        # RAM記憶體DEBUG用
+        print(f"[DEBUG] len(actor_loss_log)={len(self.actor_loss_log)}, len(critic_loss_log)={len(self.critic_loss_log)}")
 
     def _compute_gae(self, rewards, dones, values):
         T = len(rewards)

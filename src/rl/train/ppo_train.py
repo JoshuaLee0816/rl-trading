@@ -10,6 +10,7 @@ import datetime
 import torch
 import platform
 import wandb
+import psutil, os
 import matplotlib.pyplot as plt
 from pathlib import Path
 from gymnasium.vector import AsyncVectorEnv
@@ -38,6 +39,9 @@ if str(SRC_DIR) not in sys.path:
 from rl.models.ppo_agent import PPOAgent
 from rl.env.StockTradingEnv import StockTradingEnv
 from rl.test.ppo_test import run_test_suite  # ← 新增：訓練中呼叫測試
+
+# RAM記憶體觀察用
+proc = psutil.Process(os.getpid())
 
 # --------- 小工具 ----------
 def split_infos(infos):
@@ -243,7 +247,7 @@ if __name__ == "__main__":
                     )
 
             end = time.perf_counter()
-            print(f"[DEBUG] Rollout (env interaction) 花費 {end - start:.3f} 秒")
+            #print(f"[DEBUG] Rollout (env interaction) 花費 {end - start:.3f} 秒")
 
             agent.update()
 
@@ -256,8 +260,7 @@ if __name__ == "__main__":
             mdd_list = [i.get("mdd", 0.0) for i in infos_list]
             ep_mdd = min(mdd_list) * 100  # ← episode 最大回撤 (%)
 
-            print(f"[EP {ep}] days={metrics['days']} total_return={metrics['total_return']:.4f} "
-                  f"annualized={metrics['annualized_pct']:.2f}%")
+            #print(f"[EP {ep}] days={metrics['days']} total_return={metrics['total_return']:.4f} "f"annualized={metrics['annualized_pct']:.2f}%")
 
             total_ep = ep * n_envs
             if total_ep % ckpt_freq == 0:
@@ -313,10 +316,19 @@ if __name__ == "__main__":
                     if panel_imgs:
                         log_dict["test/panel"] = panel_imgs
 
-                    # <<< 只保留最近 2 次完整 test 結果 >>>
+                    # 保留最近 max_ckpts 次 test 結果
                     recent_test_logs.append(log_dict)
-                    for d in list(recent_test_logs):
+                    if len(recent_test_logs) > max_ckpts:
+                        recent_test_logs.pop(0)   # 刪最舊的 pop掉了queue的最前面 解決無限堆疊問題
+
+                    # 只上傳這些（最多 10 個）
+                    for d in recent_test_logs:
                         wandb.log(d, step=total_ep)
+
+            # RAM記憶體檢查用
+            rss = proc.memory_info().rss / 1024**3  # 常駐記憶體 (GB)
+            vms = proc.memory_info().vms / 1024**3  # 虛擬記憶體 (GB)
+            print(f"[MEM] ep={ep} | RSS={rss:.2f} GB | VMS={vms:.2f} GB")
 
     finally:
         try:

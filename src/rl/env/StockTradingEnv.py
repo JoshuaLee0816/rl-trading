@@ -106,7 +106,8 @@ class StockTradingEnv(gym.Env):
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.obs_dim,), dtype=np.float32)
         self.action_space = spaces.MultiDiscrete(self.action_dim)
 
-        print(f"[DEBUG ENV INIT] obs_dim={self.obs_dim}, action_dim={self.action_dim}, features={df.columns.tolist()}")
+        # 這個不要刪 很有用
+        #print(f"[DEBUG ENV INIT] obs_dim={self.obs_dim}, action_dim={self.action_dim}, features={df.columns.tolist()}")
 
     # ---- 工具 ----
     def _build_action_mask(self, t:int) -> torch.Tensor:
