@@ -313,9 +313,7 @@ if __name__ == "__main__":
                             panel_imgs.append(img)
                             plt.close(r["fig"])
                     if panel_imgs:
-                        # slot index 0 ~ max_ckpts-1，覆蓋舊的，最多保留 max_ckpts 組
-                        slot_idx = (ep // test_every) % max_ckpts
-                        log_dict[f"test/panel/slot{slot_idx}"] = panel_imgs
+                        log_dict[f"test/panel/slot"] = panel_imgs
 
                     # 保留最近 max_ckpts 次 test 結果（本地用）
                     recent_test_logs.append(log_dict)

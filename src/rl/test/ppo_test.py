@@ -71,7 +71,8 @@ def run_test_once(actor_path, data_path, config_path,
             print(f"[WARN] Failed to load checkpoint: {e}. Using random init.")
     else:
         if verbose:
-            print("[INFO] No checkpoint found or load_checkpoint=False. Using random init.")
+            #print("[INFO] No checkpoint found or load_checkpoint=False. Using random init.")
+            pass
 
     # === 測試 loop（argmax policy） ===
     dates, values, actions = [], [], []
@@ -106,7 +107,7 @@ def run_test_once(actor_path, data_path, config_path,
     if verbose:
         print(f"[TEST-{tag}] Total Return: {total_return:.2%}, Max Drawdown: {max_drawdown:.2%}")
     """
-    
+
     # === baseline（0050） ===
     baseline_value = (env.baseline_close / env.baseline_close[env.K]) * env.initial_cash
     df_baseline = pd.DataFrame({"date": env.dates[env.K:], "baseline": baseline_value[env.K:].cpu().numpy()})
