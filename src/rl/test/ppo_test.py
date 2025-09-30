@@ -84,8 +84,18 @@ def run_test_once(actor_path, data_path, config_path,
             mask_flat = agent.flatten_mask(info["action_mask_3d"]).unsqueeze(0)
             logits = agent.actor(obs_t)
             masked_logits = logits.masked_fill(~mask_flat, -1e9)
-            a_flat = torch.argmax(masked_logits, dim=-1).item()
-            action_tuple = agent.flat_to_tuple(a_flat)
+
+            # === softmax 取得機率分布 ===
+            probs = torch.softmax(masked_logits, dim=-1)
+            max_prob, a_flat = torch.max(probs, dim=-1)
+
+            # === 信心閾值判斷 ===
+            CONF_THRESHOLD = 0.75
+            if max_prob.item() >= CONF_THRESHOLD:
+                action_tuple = agent.flat_to_tuple(a_flat.item())
+            else:
+                # 信心不足 → 選 HOLD
+                action_tuple = (2, 0, 0)   # 假設 MultiDiscrete([op, idx, q]) 裡 2=HOLD
 
         obs, reward, terminated, _, info = env.step(action_tuple)
 
