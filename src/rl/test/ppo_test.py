@@ -19,10 +19,31 @@ if str(SRC_DIR) not in sys.path:
 from rl.env.StockTradingEnv import StockTradingEnv
 from rl.models.ppo_agent import PPOAgent
 
+# === 新增：環境快照/還原（只在測試端用，一階 lookahead） ===
+def _snapshot_env(env):
+    return {
+        "_t": env._t,
+        "cash": env.cash.clone(),
+        "shares": env.shares.clone(),
+        "avg_costs": env.avg_costs.clone(),
+        "slots": list(env.slots),
+        "portfolio_value": env.portfolio_value.clone(),
+    }
+
+def _restore_env(env, snap):
+    env._t = snap["_t"]
+    env.cash = snap["cash"]
+    env.shares = snap["shares"]
+    env.avg_costs = snap["avg_costs"]
+    env.slots = list(snap["slots"])
+    env.portfolio_value = snap["portfolio_value"]
+
 
 def run_test_once(actor_path, data_path, config_path,
                   plot=True, save_trades=False, tag="2020", verbose=True,
-                  return_fig=False):
+                  return_fig=False,
+                  policy="argmax",              # <<< 新增：策略切換（argmax / ev_greedy）
+                  conf_threshold=0.75):         # <<< 新增：argmax 信心門檻
     # === 載入 config.yaml ===
     with open(config_path, "r", encoding="utf-8") as f:
         full_cfg = yaml.safe_load(f)
@@ -74,28 +95,61 @@ def run_test_once(actor_path, data_path, config_path,
             #print("[INFO] No checkpoint found or load_checkpoint=False. Using random init.")
             pass
 
-    # === 測試 loop（argmax policy） ===
+    # === 測試 loop（支援 argmax / ev_greedy） ===
     dates, values, actions = [], [], []
     terminated = False
+
+    # 小工具：從 mask 拿到所有合法動作（flat 索引與對應 tuple）
+    def _legal_actions_from_mask(mask_flat_1d):
+        idxs = torch.nonzero(mask_flat_1d, as_tuple=False).view(-1).tolist()
+        return idxs, [agent.flat_to_tuple(i) for i in idxs]
 
     while not terminated:
         with torch.no_grad():
             obs_t = agent.obs_to_tensor(obs).unsqueeze(0)  # [1,obs_dim]
-            mask_flat = agent.flatten_mask(info["action_mask_3d"]).unsqueeze(0)
+            mask_flat = agent.flatten_mask(info["action_mask_3d"])  # [A]
             logits = agent.actor(obs_t)
-            masked_logits = logits.masked_fill(~mask_flat, -1e9)
+            masked_logits = logits.masked_fill(~mask_flat.unsqueeze(0), -1e9)
 
-            # === softmax 取得機率分布 ===
-            probs = torch.softmax(masked_logits, dim=-1)
-            max_prob, a_flat = torch.max(probs, dim=-1)
+            if policy == "argmax":
+                # === softmax 取得機率分布 ===
+                probs = torch.softmax(masked_logits, dim=-1)
+                max_prob, a_flat = torch.max(probs, dim=-1)
 
-            # === 信心閾值判斷 ===
-            CONF_THRESHOLD = 0.75
-            if max_prob.item() >= CONF_THRESHOLD:
-                action_tuple = agent.flat_to_tuple(a_flat.item())
+                # === 信心閾值判斷 ===
+                if max_prob.item() >= conf_threshold:
+                    action_tuple = agent.flat_to_tuple(int(a_flat.item()))
+                else:
+                    # 信心不足 → 選 HOLD
+                    action_tuple = (2, 0, 0)   # 假設 MultiDiscrete([op, idx, q]) 裡 2=HOLD
+
+            elif policy == "ev_greedy":
+                # 一階展望：對每個合法動作暫時 step 一次，用 Critic 的 V(s') 打分
+                legal_flat, legal_tuples = _legal_actions_from_mask(mask_flat)
+                best_v = -1e30
+                best_action = (2, 0, 0)  # 預設 HOLD（通常合法）
+                for a_flat_idx, a_tuple in zip(legal_flat, legal_tuples):
+                    snap = _snapshot_env(env)
+                    # 模擬一步
+                    try:
+                        next_obs, _, terminated, truncated, next_info = env.step(a_tuple)
+                    except Exception as e:
+                        print(f"[ERROR][EV-greedy] step({a_tuple}) failed: {e}")
+                        _restore_env(env, snap)
+                        continue
+                    # 與 select_action 對齊：丟入 critic 前做每筆標準化
+                    next_obs_t = agent.obs_to_tensor(next_obs).unsqueeze(0)
+                    next_obs_t = (next_obs_t - next_obs_t.mean(dim=1, keepdim=True)) / (next_obs_t.std(dim=1, keepdim=True) + 1e-8)
+                    v = agent.critic(next_obs_t).item()
+                    # 還原環境
+                    _restore_env(env, snap)
+                    if v > best_v:
+                        best_v = v
+                        best_action = a_tuple
+                action_tuple = best_action
+
             else:
-                # 信心不足 → 選 HOLD
-                action_tuple = (2, 0, 0)   # 假設 MultiDiscrete([op, idx, q]) 裡 2=HOLD
+                raise ValueError(f"Unknown policy: {policy}")
 
         obs, reward, terminated, _, info = env.step(action_tuple)
 
@@ -137,14 +191,14 @@ def run_test_once(actor_path, data_path, config_path,
 
             # 買點 (Buy) → 綠色三角形
             buy_points = df_trades[df_trades["side"] == "BUY"]
-            plt.scatter(buy_points["date"], buy_points["value"], 
+            plt.scatter(buy_points["date"], buy_points["value"],
                         marker="^", color="green", s=80, label="Buy")
 
             # 賣點 (Sell) → 紅色倒三角
             sell_points = df_trades[df_trades["side"] == "SELL_ALL"]
-            plt.scatter(sell_points["date"], sell_points["value"], 
+            plt.scatter(sell_points["date"], sell_points["value"],
                         marker="v", color="red", s=80, label="Sell")
-            
+
         plt.title(f"Portfolio Value Over Time ({tag})")
         plt.xlabel("Date")
         plt.ylabel("Value")

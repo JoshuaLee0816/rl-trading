@@ -38,7 +38,7 @@ if str(SRC_DIR) not in sys.path:
 # === 模組 ===
 from rl.models.ppo_agent import PPOAgent
 from rl.env.StockTradingEnv import StockTradingEnv
-from rl.test.ppo_test import run_test_suite  # ← 新增：訓練中呼叫測試
+from rl.test.ppo_test import run_test_suite, run_test_once, _resolve_test_path  # ← 只在這裡新增 import：run_test_once, _resolve_test_path
 
 # RAM記憶體觀察用
 proc = psutil.Process(os.getpid())
@@ -287,7 +287,8 @@ if __name__ == "__main__":
                             "critic": agent.critic.state_dict()}, tmp_ckpt)
 
                 years = (2020, 2021, 2022, 2023, 2024)
-                results = run_test_suite(
+                # 先跑 Argmax（沿用既有 run_test_suite）
+                results_arg = run_test_suite(
                     actor_path=tmp_ckpt,
                     config_path=ROOT / "config.yaml",
                     years=years,
@@ -296,29 +297,80 @@ if __name__ == "__main__":
                     verbose=True,
                 )
 
-                if len(results) == 0:
-                    print("[WARN] run_test_suite 沒有任何年份成功（多半是找不到測試檔）。不上傳圖。")
+                # 再跑 EV-greedy（逐年呼叫 run_test_once(policy="ev_greedy")）
+                with open(ROOT / "config.yaml", "r", encoding="utf-8") as _f:
+                    _cfg_for_test = yaml.safe_load(_f)
+
+                results_ev = {}
+                for y in years:
+                    data_path = _resolve_test_path(ROOT, _cfg_for_test, y)
+                    if not data_path.exists():
+                        print(f"[WARN] EV-greedy 測試找不到 {y} 的檔案：{data_path}")
+                        continue
+                    try:
+                        tr, mdd, _df_perf, df_base, fig, _actions = run_test_once(  # <<< 多接一個 _actions
+                            actor_path=str(tmp_ckpt),
+                            data_path=str(data_path),
+                            config_path=str(ROOT / "config.yaml"),
+                            plot=True, save_trades=True,
+                            tag=f"{y}_EV",
+                            verbose=True,
+                            return_fig=True,
+                            policy="ev_greedy"
+                        )
+                        results_ev[y] = {
+                            "total_return": tr,
+                            "max_drawdown": mdd,
+                            "fig": fig,
+                            "trades": None,
+                        }
+                    except Exception as e:
+                        print(f"[WARN] EV-greedy 測試 {y} 失敗：{e}")
+
+                if len(results_arg) == 0 and len(results_ev) == 0:
+                    print("[WARN] run_test_suite / EV-greedy 都沒有任何年份成功（多半是找不到測試檔）。不上傳圖。")
                 else:
                     log_dict = {}
                     panel_imgs = []
+
+                    # Argmax：數值 + 單年圖
                     for y in years:
-                        if y not in results:
+                        if y not in results_arg:
                             continue
-                        r = results[y]
-                        log_dict[f"test/{y}/total_return"] = float(r["total_return"])
-                        log_dict[f"test/{y}/max_drawdown"] = float(r["max_drawdown"])
+                        r = results_arg[y]
+                        # 只留面板，不上傳單項數值與單張圖
                         if r["fig"] is not None:
-                            img = wandb.Image(r["fig"], caption=f"{y}")
-                            log_dict[f"test/fig/{y}"] = img
+                            img = wandb.Image(r["fig"], caption=f"Argmax {y}")
                             panel_imgs.append(img)
                             plt.close(r["fig"])
+
+                    # EV-greedy：數值 + 單年圖
+                    panel_imgs_ev = []
+                    for y in years:
+                        if y not in results_ev:
+                            continue
+                        r = results_ev[y]
+                        # 只留面板，不上傳單項數值與單張圖
+                        if r["fig"] is not None:
+                            img = wandb.Image(r["fig"], caption=f"EV-greedy {y}")
+                            panel_imgs_ev.append(img)
+                            plt.close(r["fig"])
+
+                    # 面板：分開各一組，也可合併總覽
                     if panel_imgs:
-                        log_dict[f"test/panel/slot"] = panel_imgs
+                        log_dict[f"test_argmax/panel/slot"] = panel_imgs
+                    if panel_imgs_ev:
+                        log_dict[f"test_ev/panel/slot"] = panel_imgs_ev
+                    if panel_imgs and panel_imgs_ev:
+                        log_dict["test/panel_both"] = panel_imgs + panel_imgs_ev
 
                     # 保留最近 max_ckpts 次 test 結果（本地用）
-                    recent_test_logs.append(log_dict)
+                    if upload_wandb:
+                        recent = {}
+                        recent.update({k:v for k,v in log_dict.items() if isinstance(v, (int, float))})
+                        recent_test_logs.append(recent)
 
-                    # W&B 一次 log 就好
+                    # W&B 一次 log
                     wandb.log(log_dict, step=total_ep)
 
             # RAM記憶體檢查用
