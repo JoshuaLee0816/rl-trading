@@ -356,13 +356,10 @@ if __name__ == "__main__":
                             panel_imgs_ev.append(img)
                             plt.close(r["fig"])
 
-                    # 面板：分開各一組，也可合併總覽
-                    if panel_imgs:
-                        log_dict[f"test_argmax/panel/slot"] = panel_imgs
-                    if panel_imgs_ev:
-                        log_dict[f"test_ev/panel/slot"] = panel_imgs_ev
-                    if panel_imgs and panel_imgs_ev:
-                        log_dict["test/panel_both"] = panel_imgs + panel_imgs_ev
+                    # 面板：僅保留一個分類，把兩套策略合併在一個面板裡
+                    panel_both = panel_imgs + panel_imgs_ev
+                    if panel_both:
+                        log_dict["test/panel"] = panel_both  # ← 只留這個分類鍵
 
                     # 保留最近 max_ckpts 次 test 結果（本地用）
                     if upload_wandb:
