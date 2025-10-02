@@ -122,8 +122,16 @@ class StockTradingEnv(gym.Env):
         max_lots = torch.floor(self.cash / (self.lot_size * p_open * (1 + self.fee_buy) + 1e-8)).to(torch.int)
         max_q = torch.clamp(max_lots, 0, self.QMAX)
         q_range = torch.arange(self.QMAX + 1, device=self.device).view(1, -1)
+
+        # ✅ 限制開新倉：若已達 max_holdings，只允許對現有部位加碼
+        held_mask = (self.shares > 0) & (~baseline_mask)
+        held_count = int(held_mask.sum().item())
+        can_open_new = (held_count < self.max_holdings)
+
+        allow_idx = held_mask | (torch.tensor(can_open_new, device=self.device) & (~baseline_mask))
+
         buy_mask = (q_range <= max_q.unsqueeze(1)) & (q_range >= 1)
-        buy_mask[baseline_mask] = False
+        buy_mask &= allow_idx.unsqueeze(1)   # 套用持倉限制
         mask[0] = buy_mask
 
         sell_mask = (self.shares > 0) & (~baseline_mask)
@@ -131,6 +139,7 @@ class StockTradingEnv(gym.Env):
 
         mask[2, 0, 0] = True
         return mask
+
 
     def _mark_to_market(self, prices: torch.Tensor) -> torch.Tensor:
         return (self.shares * prices).sum() + self.cash
@@ -213,18 +222,32 @@ class StockTradingEnv(gym.Env):
                     cash_out = gross + fee
                     if cash_out <= self.cash + 1e-6:
                         old_shares = self.shares[idx]
-                        self.shares[idx] += shares
-                        self.cash -= cash_out
-                        old_cost = self.avg_costs[idx]
-                        if old_shares > 0:
-                            self.avg_costs[idx] = (old_cost * old_shares + price * shares) / (old_shares + shares)
+                        is_new_pos = (old_shares <= 0)
+
+                        if is_new_pos:
+                            # 檢查 max_holdings
+                            held_count = int(((self.shares > 0) & (~self.baseline_mask)).sum().item())
+                            if held_count >= self.max_holdings:
+                                # 滿倉 → 當作 HOLD，什麼都不做
+                                pass
+                            else:
+                                # 開新倉
+                                self.shares[idx] += shares
+                                self.cash -= cash_out
+                                self.avg_costs[idx] = price
+                                for s in range(self.max_holdings):
+                                    if self.slots[s] is None:
+                                        self.slots[s] = idx
+                                        break   # ✅ 一定要 break，避免同一股票塞進多個 slot
+                                side, exec_shares, gross_cash, fees_tax = "BUY", shares, -gross, fee
                         else:
-                            self.avg_costs[idx] = price
-                            for s in range(self.max_holdings):
-                                if self.slots[s] is None:
-                                    self.slots[s] = idx
-                                    break
-                        side, exec_shares, gross_cash, fees_tax = "BUY", shares, -gross, fee
+                            # 已持有該檔 → 加碼
+                            self.shares[idx] += shares
+                            self.cash -= cash_out
+                            old_cost = self.avg_costs[idx]
+                            self.avg_costs[idx] = (old_cost * old_shares + price * shares) / (old_shares + shares)
+                            side, exec_shares, gross_cash, fees_tax = "BUY", shares, -gross, fee
+
 
         # SELL_ALL
         elif op == 1 and 0 <= idx < self.N and mask[1, idx, 0]:
@@ -235,15 +258,35 @@ class StockTradingEnv(gym.Env):
                 fee   = int(round(gross * self.fee_sell))
                 tax   = int(round(gross * self.tax_sell))
                 cash_in = gross - fee - tax
-                self.shares[idx] = 0
+
+                # --- Debug: 賣之前快照
+                sum_before  = float(self.shares.sum().item())
+                this_before = float(self.shares[idx].item())
+
+                # 清倉該檔
+                self.shares[idx] = 0.0
                 self.cash += cash_in
                 self.avg_costs[idx] = 0.0
+
+                # 清掉所有 slot 中的 idx
                 for s in range(self.max_holdings):
                     if self.slots[s] == idx:
                         self.slots[s] = None
-                        break
+
                 side, exec_shares, gross_cash, fees_tax = "SELL_ALL", -shares, gross, fee + tax
                 self.trade_count += 1
+
+                # --- Debug: 賣之後快照
+                """
+                sum_after  = float(self.shares.sum().item())
+                this_after = float(self.shares[idx].item())
+                print(
+                    f"[DEBUG SELL_ALL][t={self._t}] idx={idx} "
+                    f"this_before={this_before:.0f}, this_after={this_after:.0f}, "
+                    f"sum_before={sum_before:.0f}, sum_after={sum_after:.0f}, "
+                    f"cash={self.cash:.0f}, V={self._mark_to_market(self.prices_close[self._t]).item():.0f}"
+                )
+                """
 
         # Reward
         reward, reward_info = self.reward_fn(self, action, side, p_close, t)
@@ -281,7 +324,7 @@ class StockTradingEnv(gym.Env):
             "fees_tax": float(fees_tax),
             "cash": float(self.cash.item()),
             "held": int((self.shares > 0).sum().item()),
-            "action_mask_3d": next_mask.detach().cpu().numpy(),  # numpy for vector env
+            "action_mask_3d": next_mask.detach().cpu().numpy(),
             "trade_count": int(self.trade_count),
             "slots_mapping": json.dumps({s: (self.ids[i] if i is not None else None) for s, i in enumerate(self.slots)}),
             "holdings_detail": json.dumps(holdings_detail),
@@ -291,3 +334,4 @@ class StockTradingEnv(gym.Env):
             },
         }
         return obs, float(reward), terminated, False, info
+
