@@ -3,8 +3,8 @@ training:
   n_episodes: 5000          # 總訓練集數
   seed: 42                  # 隨機種子
   upload_wandb: true        # 要不要上傳到 W&B
-  ckpt_freq: 100            # 每多少 episodes 存一次 checkpoint
-  max_ckpts: 5              # 最多保留的 checkpoint 數
+  ckpt_freq: 10            # 每多少 episodes 存一次 checkpoint
+  max_ckpts: 10              # 最多保留的 checkpoint 數
   load_checkpoint: false     # 是否從檢查點載入（未用）
 
   # 以下目前未在 src/rl/train/ppo_train.py 使用（保留以後擴充）
@@ -61,7 +61,7 @@ logging:
 ppo:
   # 執行設備與並行
   device: "mps"                  # mac 上會用 MPS；Windows/無 MPS 會自動 fallback 到 CPU
-  num_envs: 2
+  num_envs: 4
   use_subproc: false
 
   # 演算法超參數
@@ -79,5 +79,5 @@ ppo:
   epochs: 2
 
   # 網路結構 two hidden layers in current
-  actor_hidden: 4
-  critic_hidden: 4
+  actor_hidden: 128
+  critic_hidden: 64

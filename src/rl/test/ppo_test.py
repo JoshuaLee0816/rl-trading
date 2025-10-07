@@ -124,32 +124,46 @@ def run_test_once(actor_path, data_path, config_path,
                     action_tuple = (2, 0, 0)   # 假設 MultiDiscrete([op, idx, q]) 裡 2=HOLD
 
             elif policy == "ev_greedy":
-                # 一階展望：對每個合法動作暫時 step 一次，用 Critic 的 V(s') 打分
+                # === Top-K EV-greedy：僅模擬前 K 個動作，依 Actor 機率挑選 ===
+                K = 10  # 只模擬前 10 個動作，可依需求調整
                 legal_flat, legal_tuples = _legal_actions_from_mask(mask_flat)
-                best_v = -1e30
-                best_action = (2, 0, 0)  # 預設 HOLD（通常合法）
-                for a_flat_idx, a_tuple in zip(legal_flat, legal_tuples):
-                    snap = _snapshot_env(env)
-                    # 模擬一步
-                    try:
-                        next_obs, _, terminated, truncated, next_info = env.step(a_tuple)
-                    except Exception as e:
-                        print(f"[ERROR][EV-greedy] step({a_tuple}) failed: {e}")
+
+                # 若沒有合法動作就直接 HOLD
+                if len(legal_flat) == 0:
+                    action_tuple = (2, 0, 0)
+                else:
+                    # 1️⃣ 先根據 actor 機率分布選出前 K 個動作
+                    with torch.no_grad():
+                        probs = torch.softmax(masked_logits, dim=-1).squeeze(0)  # [A]
+                        topk = torch.topk(probs, k=min(K, len(probs)))            # 前 K 個動作
+                    top_actions = [agent.flat_to_tuple(int(i)) for i in topk.indices.tolist()]
+
+                    # 2️⃣ 對這些動作各別模擬一步，用 critic 的 V(s') 打分
+                    best_v = -1e30
+                    best_action = (2, 0, 0)  # 預設 HOLD
+                    for a_tuple in top_actions:
+                        snap = _snapshot_env(env)
+                        try:
+                            next_obs, _, terminated, truncated, next_info = env.step(a_tuple)
+                            next_obs_t = agent.obs_to_tensor(next_obs).unsqueeze(0)
+                            next_obs_t = (next_obs_t - next_obs_t.mean(dim=1, keepdim=True)) / (
+                                next_obs_t.std(dim=1, keepdim=True) + 1e-8
+                            )
+                            v = agent.critic(next_obs_t).item()
+                        except Exception as e:
+                            print(f"[ERROR][EV-greedy] step({a_tuple}) failed: {e}")
+                            v = -1e30
                         _restore_env(env, snap)
-                        continue
-                    # 與 select_action 對齊：丟入 critic 前做每筆標準化
-                    next_obs_t = agent.obs_to_tensor(next_obs).unsqueeze(0)
-                    next_obs_t = (next_obs_t - next_obs_t.mean(dim=1, keepdim=True)) / (next_obs_t.std(dim=1, keepdim=True) + 1e-8)
-                    v = agent.critic(next_obs_t).item()
-                    # 還原環境
-                    _restore_env(env, snap)
-                    if v > best_v:
-                        best_v = v
-                        best_action = a_tuple
-                action_tuple = best_action
+                        if v > best_v:
+                            best_v = v
+                            best_action = a_tuple
+
+                    # 3️⃣ 最後選出期望值最高的動作
+                    action_tuple = best_action
 
             else:
                 raise ValueError(f"Unknown policy: {policy}")
+
 
         obs, reward, terminated, _, info = env.step(action_tuple)
 
