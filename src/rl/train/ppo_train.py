@@ -254,10 +254,13 @@ if __name__ == "__main__":
 
             metrics = compute_episode_metrics(daily_returns)
             days = metrics["days"]
-            #ep_trade_counts = [i.get("trade_count", 0) for i in infos_list]
-            #avg_trades = float(np.mean(ep_trade_counts)) / days * 252
-            total_trades = int(np.sum(ep_trade_counts))
-            avg_trades = (total_trades / max(1, days)) * 252.0
+
+            # 計算平均年化交易次數 (次／年) ===
+            final_trade_counts = [i.get("trade_count", 0) for i in infos_list]
+            avg_trades_per_episode = float(np.mean(final_trade_counts))
+
+            # 換算成年化次數（假設一年 252 交易日）
+            avg_trades = (avg_trades_per_episode / max(1, days)) * 252.0
 
             # check MDD 有沒有學會
             mdd_list = [i.get("mdd", 0.0) for i in infos_list]
@@ -276,8 +279,8 @@ if __name__ == "__main__":
                     "train/critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
                     "train/entropy": agent.entropy_log[-1] if agent.entropy_log else None,
                     "train/avg_trade_count": avg_trades,
-                    "train/mdd": ep_mdd,
-                    "eval/total_return": float(metrics["total_return"]),
+                    "train/mdd%": ep_mdd,
+                    "eval/total_return%": float(metrics["total_return"]),
                     #"eval/annualized_pct": float(metrics["annualized_pct"]),
                 }, step=total_ep)
 
