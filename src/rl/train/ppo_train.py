@@ -60,17 +60,6 @@ def split_infos(infos):
     else:
         return infos
 
-"""
-def normalize_mask_batch(mask_any):
-    if mask_any is None:
-        return None
-    if isinstance(mask_any, list):
-        return torch.stack([torch.as_tensor(m, dtype=torch.bool) for m in mask_any])
-    if isinstance(mask_any, torch.Tensor):
-        return mask_any.to(dtype=torch.bool)
-    return torch.stack([torch.as_tensor(m, dtype=torch.bool) for m in mask_any])
-"""
-
 def save_checkpoint(run_dir: Path, agent, ep: int) -> Path:
     ckpt_path = run_dir / f"checkpoint_ep{ep}.pt"
     torch.save({
