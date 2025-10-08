@@ -158,15 +158,15 @@ if __name__ == "__main__":
     def make_env():
         def _init():
             return StockTradingEnv(
-                df=df,
-                stock_ids=ids,
-                lookback=lookback,
-                initial_cash=init_cash,
-                reward_mode=reward_mode,
-                action_mode=action_mode,
-                max_holdings=max_holdings,
-                qmax_per_trade=qmax_per_trade,
-                device="cpu",  # ⚠️ 環境固定CPU
+                df = df,
+                stock_ids = ids,
+                lookback = lookback,
+                initial_cash = init_cash,
+                reward_mode = reward_mode,
+                action_mode = action_mode,
+                max_holdings = max_holdings,
+                qmax_per_trade = qmax_per_trade,
+                device="cpu", 
             )
         return _init
 
@@ -204,7 +204,7 @@ if __name__ == "__main__":
 
     # 進度條：總回合 = 外層集數 * 環境數
     # progress_bar = trange(1, n_episodes * n_envs + 1, unit="episode", unit_scale=n_envs)
-    progress_bar = trange(1, n_episodes + 1, unit="outer-ep")
+    progress_bar = trange(1, n_episodes + 1, unit="EP")
 
     try:
         for ep in progress_bar:
