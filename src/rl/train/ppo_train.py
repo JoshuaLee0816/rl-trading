@@ -280,7 +280,7 @@ if __name__ == "__main__":
                     "train/entropy": agent.entropy_log[-1] if agent.entropy_log else None,
                     "train/avg_trade_count": avg_trades,
                     "train/mdd%": ep_mdd,
-                    "eval/total_return%": float(metrics["total_return"] * 100.0),
+                    "eval/total_return%": float(metrics["total_return"] * 100.0), #這個是指整個episodes訓練完成後的總報酬
                     #"eval/annualized_pct": float(metrics["annualized_pct"]),
                 }, step=total_ep)
 
