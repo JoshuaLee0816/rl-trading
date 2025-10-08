@@ -38,15 +38,15 @@ if str(SRC_DIR) not in sys.path:
 # === 模組 ===
 from rl.models.ppo_agent import PPOAgent
 from rl.env.StockTradingEnv import StockTradingEnv
-from rl.test.ppo_test import run_test_suite, run_test_once, _resolve_test_path  # ← 只在這裡新增 import：run_test_once, _resolve_test_path
+from rl.test.ppo_test import run_test_suite, run_test_once, _resolve_test_path 
 
 # RAM記憶體觀察用
 proc = psutil.Process(os.getpid())
 
-# --------- 小工具 ----------
+# region --------- 小工具 ----------
 def split_infos(infos):
     """
-    將 AsyncVectorEnv 的 infos(dict of arrays) 攤平成 list[dict]（每個env一份）
+    將 AsyncVectorEnv 的 infos(dict of arrays) 攤平成 list[dict]
     """
     if isinstance(infos, dict) and len(infos) > 0 and isinstance(next(iter(infos.values())), (np.ndarray, list, tuple)):
         n = len(next(iter(infos.values())))
@@ -88,8 +88,9 @@ def compute_episode_metrics(daily_returns: list[torch.Tensor]) -> dict:
     annualized_return = ((1.0 + total_return) ** (252.0 / days) - 1.0)
     return {"R_total": R_total, "total_return": total_return, "days": days, "annualized_pct": annualized_return * 100.0}
 
+# endregion 小工具
 
-# ============== 主程式 ==============
+# region 主程式
 if __name__ == "__main__":
     # 讀設定
     with open(ROOT / "config.yaml", "r", encoding="utf-8") as f:
@@ -116,6 +117,7 @@ if __name__ == "__main__":
     max_holdings   = int(env_cfg.get("max_holdings"))
     qmax_per_trade = int(env_cfg.get("qmax_per_trade"))
 
+    # region W&B 初始化
     # W&B 初始化設定
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     if upload_wandb:
@@ -388,3 +390,5 @@ if __name__ == "__main__":
         wandb.save(str(run_dir / "ppo_actor.pt"))
         wandb.save(str(run_dir / "ppo_critic.pt"))
     print(f"Training finished. Results saved in: {run_dir}")
+
+# endregion 主程式
