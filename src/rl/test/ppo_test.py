@@ -1,9 +1,16 @@
+"""
+ppo_test.py
+用途：載入已訓練的 PPO Actor,對單一年度或多年度測試,輸出績效(Total Return、Max Drawdown)與圖表／交易紀錄。
+支援策略：
+- policy="argmax":以機率最大動作,並設置信心門檻(conf_threshold)不足則 HOLD
+- policy="ev_greedy":Top-K 一階展望，用 Critic 的 V(s') 評分，選期望值最高動作
+"""
+
 import torch
 import os
 import sys
 import yaml
 import pandas as pd
-import numpy as np
 import matplotlib
 matplotlib.use("Agg")  # 訓練中評測避免 block GUI
 import matplotlib.pyplot as plt
@@ -19,7 +26,7 @@ if str(SRC_DIR) not in sys.path:
 from rl.env.StockTradingEnv import StockTradingEnv
 from rl.models.ppo_agent import PPOAgent
 
-# === 新增：環境快照/還原（只在測試端用，一階 lookahead） ===
+# === 環境快照/還原（只在測試端用，一階 lookahead） ===
 def _snapshot_env(env):
     return {
         "_t": env._t,
@@ -39,11 +46,18 @@ def _restore_env(env, snap):
     env.portfolio_value = snap["portfolio_value"]
 
 
-def run_test_once(actor_path, data_path, config_path,
-                  plot=True, save_trades=False, tag="2020", verbose=True,
-                  return_fig=False,
-                  policy="argmax",              # <<< 新增：策略切換（argmax / ev_greedy）
-                  conf_threshold=0.75):         # <<< 新增：argmax 信心門檻
+def run_test_once(
+    actor_path,
+    data_path,
+    config_path,
+    plot=True,
+    save_trades=False,
+    tag="2020",
+    verbose=True,
+    return_fig=False,
+    policy="argmax",              
+    conf_threshold=0.75           
+):        
     # === 載入 config.yaml ===
     with open(config_path, "r", encoding="utf-8") as f:
         full_cfg = yaml.safe_load(f)
@@ -92,7 +106,6 @@ def run_test_once(actor_path, data_path, config_path,
             print(f"[WARN] Failed to load checkpoint: {e}. Using random init.")
     else:
         if verbose:
-            #print("[INFO] No checkpoint found or load_checkpoint=False. Using random init.")
             pass
 
     # === 測試 loop（支援 argmax / ev_greedy） ===
@@ -120,31 +133,31 @@ def run_test_once(actor_path, data_path, config_path,
                 if max_prob.item() >= conf_threshold:
                     action_tuple = agent.flat_to_tuple(int(a_flat.item()))
                 else:
-                    # 信心不足 → 選 HOLD
-                    action_tuple = (2, 0, 0)   # 假設 MultiDiscrete([op, idx, q]) 裡 2=HOLD
+                    # 信心不足 : 選 HOLD
+                    action_tuple = (2, 0, 0)   # MultiDiscrete([op, idx, q]) 裡 2=HOLD
 
             elif policy == "ev_greedy":
                 # === Top-K EV-greedy：僅模擬前 K 個動作，依 Actor 機率挑選 ===
-                K = 10  # 只模擬前 10 個動作，可依需求調整
-                legal_flat, legal_tuples = _legal_actions_from_mask(mask_flat)
+                TOPK = 10  # 只模擬前 10 個動作
+                legal_flat, _ = _legal_actions_from_mask(mask_flat)
 
                 # 若沒有合法動作就直接 HOLD
                 if len(legal_flat) == 0:
                     action_tuple = (2, 0, 0)
                 else:
-                    # 1️⃣ 先根據 actor 機率分布選出前 K 個動作
-                    with torch.no_grad():
-                        probs = torch.softmax(masked_logits, dim=-1).squeeze(0)  # [A]
-                        topk = torch.topk(probs, k=min(K, len(probs)))            # 前 K 個動作
+                    # 先根據 actor 機率分布選出前 K 個動作
+                    probs = torch.softmax(masked_logits, dim=-1).squeeze(0)  # [A]
+                    k = min(TOPK, int(mask_flat.sum().item()))
+                    topk = torch.topk(probs, k=k)            # k 上限以實際可行動作數為準
                     top_actions = [agent.flat_to_tuple(int(i)) for i in topk.indices.tolist()]
 
-                    # 2️⃣ 對這些動作各別模擬一步，用 critic 的 V(s') 打分
+                    # 對這些動作各別模擬一步，用 critic 的 V(s') 打分
                     best_v = -1e30
                     best_action = (2, 0, 0)  # 預設 HOLD
                     for a_tuple in top_actions:
                         snap = _snapshot_env(env)
                         try:
-                            next_obs, _, terminated, truncated, next_info = env.step(a_tuple)
+                            next_obs, _, sim_term, sim_trunc, next_info = env.step(a_tuple)
                             next_obs_t = agent.obs_to_tensor(next_obs).unsqueeze(0)
                             next_obs_t = (next_obs_t - next_obs_t.mean(dim=1, keepdim=True)) / (
                                 next_obs_t.std(dim=1, keepdim=True) + 1e-8
@@ -158,7 +171,7 @@ def run_test_once(actor_path, data_path, config_path,
                             best_v = v
                             best_action = a_tuple
 
-                    # 3️⃣ 最後選出期望值最高的動作
+                    # 最後選出期望值最高的動作
                     action_tuple = best_action
 
             else:
@@ -181,16 +194,16 @@ def run_test_once(actor_path, data_path, config_path,
     drawdown = df_perf["value"] / roll_max - 1
     max_drawdown = drawdown.min()
 
-    """
-    if verbose:
-        print(f"[TEST-{tag}] Total Return: {total_return:.2%}, Max Drawdown: {max_drawdown:.2%}")
-    """
-
     # === baseline（0050） ===
-    baseline_value = (env.baseline_close / env.baseline_close[env.K]) * env.initial_cash
-    df_baseline = pd.DataFrame({"date": env.dates[env.K:], "baseline": baseline_value[env.K:].cpu().numpy()})
-    df_baseline["date"] = pd.to_datetime(df_baseline["date"])
-    df_baseline.set_index("date", inplace=True)
+    try:
+        baseline_value = (env.baseline_close / env.baseline_close[env.K]) * env.initial_cash
+        df_baseline = pd.DataFrame({"date": env.dates[env.K:], "baseline": baseline_value[env.K:].cpu().numpy()})
+        df_baseline["date"] = pd.to_datetime(df_baseline["date"])
+        df_baseline.set_index("date", inplace=True)
+    except Exception as e:
+        if verbose:
+            print(f"[WARN] Baseline unavailable: {e}")
+        df_baseline = pd.DataFrame(index=df_perf.index, data={"baseline": float("nan")})    
 
     # === 繪圖 ===
     fig = None
@@ -218,7 +231,6 @@ def run_test_once(actor_path, data_path, config_path,
         plt.ylabel("Value")
         plt.legend()
         plt.grid(True)
-        # 不呼叫 plt.show()；由訓練端或主程式自行處理
 
     # === 交易紀錄 ===
     if save_trades:
@@ -227,17 +239,14 @@ def run_test_once(actor_path, data_path, config_path,
         df_trades = pd.DataFrame(actions, columns=["date", "side", "stock_id", "lots", "cash", "value"])
         df_trades.to_csv(out_path, index=False)
 
-    # <<< 修改：在 save_trades=True 時，多回傳 trades
-    if return_fig:
-        if save_trades:
-            return total_return, max_drawdown, df_perf, df_baseline, fig, actions   # <<< 修改
-        else:
-            return total_return, max_drawdown, df_perf, df_baseline, fig
-    else:
-        if save_trades:
-            return total_return, max_drawdown, df_perf, df_baseline, actions        # <<< 修改
-        else:
-            return total_return, max_drawdown, df_perf, df_baseline
+    # 回傳邏輯統一，盡量不分支爆炸
+    if return_fig and save_trades:
+        return total_return, max_drawdown, df_perf, df_baseline, fig, actions
+    if return_fig and not save_trades:
+        return total_return, max_drawdown, df_perf, df_baseline, fig
+    if not return_fig and save_trades:
+        return total_return, max_drawdown, df_perf, df_baseline, actions
+    return total_return, max_drawdown, df_perf, df_baseline
 
 
 def _resolve_test_path(root: Path, cfg: dict, year: int) -> Path:
@@ -255,21 +264,24 @@ def _resolve_test_path(root: Path, cfg: dict, year: int) -> Path:
     p_csv     = root / "data" / "processed" / f"test_{year}.csv"
     return p_parquet if p_parquet.exists() else p_csv
 
-def run_test_suite(actor_path: Path, config_path: Path, years=(2020, 2021, 2022, 2023, 2024),
-                   plot=True, save_trades=False, verbose=True):
-    """
-    依序跑多個年份測試；回傳 dict:
-      results[year] = {
-          "total_return": float,
-          "max_drawdown": float,
-          "fig": matplotlib.figure.Figure,
-          "trades": list[dict] | None
-      }
-    """
+def run_test_suite(
+    actor_path: Path,
+    config_path: Path,
+    years=(2020, 2021, 2022, 2023, 2024),
+    plot=True,
+    save_trades=False,
+    verbose=True,
+    policy="argmax", # 透傳策略參數，避免每年測試時手動改
+    conf_threshold=0.75,
+    overlay_plot=False # 是否在 suite 結束後做「多年份疊圖」
+):
+
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     results = {}
+    overlay_fig = None # 用於 overlay 的參考，避免外部再收集
+
     for y in years:
         data_path = _resolve_test_path(ROOT, cfg, y)
         if not data_path.exists():
@@ -278,8 +290,7 @@ def run_test_suite(actor_path: Path, config_path: Path, years=(2020, 2021, 2022,
             continue
 
         if save_trades:
-            # <<< 修改：接收 trades
-            tr, mdd, _, _, fig, trades = run_test_once(
+            tr, mdd, df_perf, df_base, fig, trades = run_test_once(
                 actor_path=str(actor_path),
                 data_path=str(data_path),
                 config_path=str(config_path),
@@ -288,15 +299,11 @@ def run_test_suite(actor_path: Path, config_path: Path, years=(2020, 2021, 2022,
                 tag=str(y),
                 verbose=verbose,
                 return_fig=True,
+                policy=policy,                    
+                conf_threshold=conf_threshold,   
             )
-            results[y] = {
-                "total_return": tr,
-                "max_drawdown": mdd,
-                "fig": fig,
-                "trades": trades,   # <<< 修改
-            }
         else:
-            tr, mdd, _, _, fig = run_test_once(
+            tr, mdd, df_perf, df_base, fig = run_test_once(
                 actor_path=str(actor_path),
                 data_path=str(data_path),
                 config_path=str(config_path),
@@ -305,13 +312,37 @@ def run_test_suite(actor_path: Path, config_path: Path, years=(2020, 2021, 2022,
                 tag=str(y),
                 verbose=verbose,
                 return_fig=True,
+                policy=policy,                  
+                conf_threshold=conf_threshold,    
             )
-            results[y] = {
-                "total_return": tr,
-                "max_drawdown": mdd,
-                "fig": fig,
-                "trades": None,    # <<< 修改：保持欄位一致
-            }
+            trades = None
+
+    # 多年份疊圖
+    if overlay_plot and len(results) > 0:
+        overlay_fig = plt.figure(figsize=(10, 6))
+        for y, r in results.items():
+            dfp = r.get("df_perf")
+            dfb = r.get("df_baseline")
+            if dfp is not None and not dfp.empty:
+                plt.plot(dfp.index, dfp["value"], label=f"Agent {y}")
+            if dfb is not None and "baseline" in dfb and not dfb["baseline"].isna().all():
+                plt.plot(dfb.index, dfb["baseline"], linestyle="--", label=f"0050 {y}")
+        plt.title("Portfolio vs Baseline (Multi-Year Overlay)")
+        plt.xlabel("Date")
+        plt.ylabel("Value")
+        plt.legend()
+        plt.grid(True)
+
+        # 統一放在 results[-1]
+        results["_overlay_fig"] = overlay_fig
+        results[y] = {
+            "total_return": tr,
+            "max_drawdown": mdd,
+            "fig": fig,
+            "trades": None,  
+            "df_perf": df_perf,
+            "df_baseline": df_base,
+        }
 
     return results
 
@@ -331,7 +362,20 @@ if __name__ == "__main__":
     print(f"[INFO] Using actor checkpoint: {ACTOR_PATH}")
     print(f"[INFO] Years: {YEARS}")
 
-    results = run_test_suite(ACTOR_PATH, CONFIG_PATH, years=YEARS, plot=True, save_trades=True, verbose=True)
+    # 預設做一次多年份疊圖
+    results = run_test_suite(
+        ACTOR_PATH,
+        CONFIG_PATH,
+        years=YEARS,
+        plot=True,
+        save_trades=True,
+        verbose=True,
+        policy="argmax",        
+        conf_threshold=0.75,
+        overlay_plot=True
+    )
+    
     for y, r in results.items():
         print(f"[{y}] TR={r['total_return']:.2%}, MDD={r['max_drawdown']:.2%}")
+        
     plt.show()
