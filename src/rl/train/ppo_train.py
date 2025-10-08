@@ -291,6 +291,7 @@ if __name__ == "__main__":
                             "critic": agent.critic.state_dict()}, tmp_ckpt)
 
                 years = (2020, 2021, 2022, 2023, 2024)
+                """
                 # 先跑 Argmax（沿用既有 run_test_suite）
                 results_arg = run_test_suite(
                     actor_path=tmp_ckpt,
@@ -300,6 +301,7 @@ if __name__ == "__main__":
                     save_trades=True,
                     verbose=True,
                 )
+                """
 
                 # 再跑 EV-greedy（逐年呼叫 run_test_once(policy="ev_greedy")）
                 with open(ROOT / "config.yaml", "r", encoding="utf-8") as _f:
@@ -316,8 +318,9 @@ if __name__ == "__main__":
                             actor_path=str(tmp_ckpt),
                             data_path=str(data_path),
                             config_path=str(ROOT / "config.yaml"),
-                            plot=True, save_trades=True,
-                            tag=f"{y}_EV",
+                            plot=True, 
+                            save_trades=True,
+                            tag=f"{y}_EV_ep{ep}",
                             verbose=True,
                             return_fig=True,
                             policy="ev_greedy"
@@ -331,7 +334,7 @@ if __name__ == "__main__":
                     except Exception as e:
                         print(f"[WARN] EV-greedy 測試 {y} 失敗：{e}")
 
-                if len(results_arg) == 0 and len(results_ev) == 0:
+                if len(results_ev) == 0 and len(results_ev) == 0:
                     print("[WARN] run_test_suite / EV-greedy 都沒有任何年份成功（多半是找不到測試檔）。不上傳圖。")
                 else:
                     log_dict = {}
@@ -339,9 +342,9 @@ if __name__ == "__main__":
 
                     # Argmax：數值 + 單年圖
                     for y in years:
-                        if y not in results_arg:
+                        if y not in results_ev:
                             continue
-                        r = results_arg[y]
+                        r = results_ev[y]
                         # 只留面板，不上傳單項數值與單張圖
                         if r["fig"] is not None:
                             img = wandb.Image(r["fig"], caption=f"Argmax {y}")

@@ -253,14 +253,10 @@ def run_test_once(
 
     # === 交易紀錄 ===
     if save_trades:
-        """
-        out_path = Path("src/rl/test/testing_output") / f"trades_{tag}.csv"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        df_trades = pd.DataFrame(actions, columns=["date", "side", "stock_id", "lots", "cash", "value"])
-        df_trades.to_csv(out_path, index=False)
-        """
 
+        # 加上 episode 編號避免覆蓋 ===
         out_path = Path("src/rl/test/testing_output") / f"trades_{tag}.csv"
+
         out_path.parent.mkdir(parents=True, exist_ok=True)
         df_trades = pd.DataFrame(trade_records)
         # 新增報酬率欄位（相對於第一筆的 Portfolio Value）
