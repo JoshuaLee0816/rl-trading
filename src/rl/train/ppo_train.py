@@ -60,6 +60,7 @@ def split_infos(infos):
     else:
         return infos
 
+"""
 def normalize_mask_batch(mask_any):
     if mask_any is None:
         return None
@@ -68,6 +69,7 @@ def normalize_mask_batch(mask_any):
     if isinstance(mask_any, torch.Tensor):
         return mask_any.to(dtype=torch.bool)
     return torch.stack([torch.as_tensor(m, dtype=torch.bool) for m in mask_any])
+"""
 
 def save_checkpoint(run_dir: Path, agent, ep: int) -> Path:
     ckpt_path = run_dir / f"checkpoint_ep{ep}.pt"
@@ -201,7 +203,8 @@ if __name__ == "__main__":
     print(f"Max_holdings={max_holdings}, QMAX={qmax_per_trade}")
 
     # 進度條：總回合 = 外層集數 * 環境數
-    progress_bar = trange(1, n_episodes * n_envs + 1, unit="episode", unit_scale=n_envs)
+    # progress_bar = trange(1, n_episodes * n_envs + 1, unit="episode", unit_scale=n_envs)
+    progress_bar = trange(1, n_episodes + 1, unit="outer-ep")
 
     try:
         for ep in progress_bar:
@@ -231,7 +234,11 @@ if __name__ == "__main__":
 
                 cur_V = torch.tensor([i["V"] for i in infos_list], dtype=torch.float32)
                 log_ret = torch.log(cur_V / (prev_V + 1e-8))
-                daily_returns.append(log_ret.detach().cpu())
+                mask_alive = ~(torch.as_tensor(dones, dtype=torch.bool) | torch.as_tensor(truncs, dtype=torch.bool))
+                if mask_alive.any():
+                    daily_returns.append(log_ret[mask_alive].detach().cpu())
+
+                #daily_returns.append(log_ret.detach().cpu())
                 prev_V = cur_V
 
                 for i in range(n_envs):
@@ -252,8 +259,10 @@ if __name__ == "__main__":
 
             metrics = compute_episode_metrics(daily_returns)
             days = metrics["days"]
-            ep_trade_counts = [i.get("trade_count", 0) for i in infos_list]
-            avg_trades = float(np.mean(ep_trade_counts)) / days * 252
+            #ep_trade_counts = [i.get("trade_count", 0) for i in infos_list]
+            #avg_trades = float(np.mean(ep_trade_counts)) / days * 252
+            total_trades = int(np.sum(ep_trade_counts))
+            avg_trades = (total_trades / max(1, days)) * 252.0
 
             # check MDD 有沒有學會
             mdd_list = [i.get("mdd", 0.0) for i in infos_list]
@@ -369,6 +378,12 @@ if __name__ == "__main__":
 
                     # W&B 一次 log
                     wandb.log(log_dict, step=total_ep)
+                
+                # 清理臨時 ckpt
+                try:
+                    tmp_ckpt.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
             # RAM記憶體檢查用
             rss = proc.memory_info().rss / 1024**3  # 常駐記憶體 (GB)
