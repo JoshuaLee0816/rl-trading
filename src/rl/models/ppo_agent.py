@@ -249,9 +249,11 @@ class PPOAgent:
         t2 = time.perf_counter()
 
         advantages = (advantages_raw - advantages_raw.mean()) / (advantages_raw.std() + 1e-8)
+        """
         if wandb.run is not None:
             wandb.log({"adv_mean_raw": advantages_raw.mean().item(),
                        "adv_std_raw": advantages_raw.std().item()})
+        """
 
         N = obs.size(0)
         entropies = []

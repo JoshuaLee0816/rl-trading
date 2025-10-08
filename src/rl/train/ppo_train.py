@@ -127,10 +127,10 @@ if __name__ == "__main__":
     max_holdings   = int(env_cfg.get("max_holdings"))
     qmax_per_trade = int(env_cfg.get("qmax_per_trade"))
 
-    # W&B
+    # W&B 初始化設定
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     if upload_wandb:
-        wandb.init(project="rl-trading", name=f"run_{run_id}", job_type="train", config=ppo_cfg)
+        wandb.init(project="rl-trading", name=f"run_{run_id}", job_type="train", config=ppo_cfg, settings=wandb.Settings(_disable_stats=True))
         # 建立固定長度的存放圖表區
         recent_test_logs = deque(maxlen=max_ckpts)
 
@@ -277,16 +277,13 @@ if __name__ == "__main__":
 
             if upload_wandb and (ep % max(1, wandb_every) == 0):
                 wandb.log({
-                    "train/episode_outer": ep,
-                    "train/episode_total": total_ep,
                     "train/actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
                     "train/critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
                     "train/entropy": agent.entropy_log[-1] if agent.entropy_log else None,
-                    "eval/days": int(metrics["days"]),
-                    "eval/total_return": float(metrics["total_return"]),
-                    "eval/annualized_pct": float(metrics["annualized_pct"]),
                     "train/avg_trade_count": avg_trades,
                     "train/mdd": ep_mdd,
+                    "eval/total_return": float(metrics["total_return"]),
+                    #"eval/annualized_pct": float(metrics["annualized_pct"]),
                 }, step=total_ep)
 
             # === 每 test_every 個 outer-episode 跑一次 5 年測試並上傳到 W&B ===
