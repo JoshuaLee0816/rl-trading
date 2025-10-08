@@ -114,6 +114,8 @@ def run_test_once(
 
     # === 測試 loop（支援 argmax / ev_greedy） ===
     dates, values, actions = [], [], []
+    trade_records = [] #存交易紀錄
+
     terminated = False
 
     # 小工具：從 mask 拿到所有合法動作（flat 索引與對應 tuple）
@@ -188,6 +190,19 @@ def run_test_once(
         values.append(info["V"])
         actions.append((info["date"], info["side"], info["stock_id"], info["lots"], info["cash"], info["V"]))
 
+        # [新增] 每筆交易紀錄（只記 BUY/SELL，不記 HOLD）
+        if info["side"] in ["BUY", "SELL_ALL"]:
+            trade_records.append({
+                "date": info["date"],
+                "action": info["side"],
+                "stock_id": info["stock_id"],
+                "lots": info["lots"],
+                "price": round(info["price"], 2) if "price" in info else None,
+                "cash_after": round(info["cash"], 2),
+                "portfolio_value": round(info["V"], 2),
+                "reward": round(reward, 4),
+            })
+
     # === 績效分析 ===
     df_perf = pd.DataFrame({"date": dates, "value": values})
     df_perf["date"] = pd.to_datetime(df_perf["date"])
@@ -238,10 +253,40 @@ def run_test_once(
 
     # === 交易紀錄 ===
     if save_trades:
+        """
         out_path = Path("src/rl/test/testing_output") / f"trades_{tag}.csv"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         df_trades = pd.DataFrame(actions, columns=["date", "side", "stock_id", "lots", "cash", "value"])
         df_trades.to_csv(out_path, index=False)
+        """
+
+        out_path = Path("src/rl/test/testing_output") / f"trades_{tag}.csv"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        df_trades = pd.DataFrame(trade_records)
+        # 新增報酬率欄位（相對於第一筆的 Portfolio Value）
+        if len(df_trades) > 0:
+            first_value = df_trades["portfolio_value"].iloc[0]
+            df_trades["return(%)"] = (df_trades["portfolio_value"] / first_value - 1) * 100
+
+        df_trades["trade_profit"] = None
+        df_trades["trade_return(%)"] = None
+
+        buy_price, buy_lots = None, None
+        for i, row in df_trades.iterrows():
+            if row["action"] == "BUY":
+                buy_price = row["price"]
+                buy_lots = row["lots"]
+            elif row["action"] == "SELL_ALL" and buy_price is not None:
+                sell_price = row["price"]
+                profit = (sell_price - buy_price) * buy_lots * 1000  # 單位元
+                trade_return = (sell_price / buy_price - 1) * 100
+                df_trades.loc[i, "trade_profit"] = round(profit, 2)
+                df_trades.loc[i, "trade_return(%)"] = round(trade_return, 2)
+                # 清空 buy 狀態，避免跨股票混算
+                buy_price, buy_lots = None, None
+
+        df_trades.to_csv(out_path, index=False, encoding="utf-8-sig")
+        print(f"[INFO] 交易紀錄已儲存：{out_path}")
 
     # 回傳邏輯統一，盡量不分支爆炸
     if return_fig and save_trades:
@@ -381,5 +426,5 @@ if __name__ == "__main__":
     
     for y, r in results.items():
         print(f"[{y}] TR={r['total_return']:.2%}, MDD={r['max_drawdown']:.2%}")
-        
+
     plt.show()

@@ -277,18 +277,6 @@ class StockTradingEnv(gym.Env):
                 side, exec_shares, gross_cash, fees_tax = "SELL_ALL", -shares, gross, fee + tax
                 self.trade_count += 1
 
-                # --- Debug: 賣之後快照
-                """
-                sum_after  = float(self.shares.sum().item())
-                this_after = float(self.shares[idx].item())
-                print(
-                    f"[DEBUG SELL_ALL][t={self._t}] idx={idx} "
-                    f"this_before={this_before:.0f}, this_after={this_after:.0f}, "
-                    f"sum_before={sum_before:.0f}, sum_after={sum_after:.0f}, "
-                    f"cash={self.cash:.0f}, V={self._mark_to_market(self.prices_close[self._t]).item():.0f}"
-                )
-                """
-
         # Reward
         reward, reward_info = self.reward_fn(self, action, side, p_close, t)
 
@@ -325,6 +313,7 @@ class StockTradingEnv(gym.Env):
             "fees_tax": float(fees_tax),
             "cash": float(self.cash.item()),
             "held": int((self.shares > 0).sum().item()),
+            "price": float(price) if "price" in locals() else None,
             "action_mask_3d": next_mask.detach().cpu().numpy(),
             "trade_count": int(self.trade_count),
             "slots_mapping": json.dumps({s: (self.ids[i] if i is not None else None) for s, i in enumerate(self.slots)}),
