@@ -6,15 +6,18 @@ ppo_test.py
 - policy="ev_greedy":Top-K 一階展望，用 Critic 的 V(s') 評分，選期望值最高動作
 """
 
-import torch
 import os
 import sys
-import yaml
-import pandas as pd
+
 import matplotlib
+import pandas as pd
+import torch
+import yaml
+
 matplotlib.use("Agg")  # 訓練中評測避免 block GUI
-import matplotlib.pyplot as plt
 from pathlib import Path
+
+import matplotlib.pyplot as plt
 
 # === 專案路徑 ===
 HERE = Path(__file__).resolve()
@@ -25,6 +28,7 @@ if str(SRC_DIR) not in sys.path:
 
 from rl.env.StockTradingEnv import StockTradingEnv
 from rl.models.ppo_agent import PPOAgent
+
 
 # === 環境快照/還原（只在測試端用，一階 lookahead） ===
 def _snapshot_env(env):

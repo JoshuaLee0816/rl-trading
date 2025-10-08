@@ -1,11 +1,13 @@
+import platform
+import time
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
-import platform
-import wandb
-import time
 from torch.distributions import Categorical
+
+import wandb
 
 LARGE_NEG = -1e9
 

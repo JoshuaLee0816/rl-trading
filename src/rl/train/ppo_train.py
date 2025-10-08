@@ -1,22 +1,26 @@
 import os
+
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
+import datetime
+import multiprocessing as mp
+import os
+import platform
 import sys
 import time
-import yaml
+from collections import deque
+from pathlib import Path
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import datetime
+import psutil
 import torch
-import platform
-import wandb
-import psutil, os
-import matplotlib.pyplot as plt
-from pathlib import Path
+import yaml
 from gymnasium.vector import AsyncVectorEnv
 from tqdm import trange
-from collections import deque
-import multiprocessing as mp
+
+import wandb
 
 # ==== 建議：Mac 避免 fork + MPS 衝突，強制 spawn ====
 try:
@@ -35,10 +39,10 @@ ROOT = HERE.parents[3]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from rl.env.StockTradingEnv import StockTradingEnv
 # === 模組 ===
 from rl.models.ppo_agent import PPOAgent
-from rl.env.StockTradingEnv import StockTradingEnv
-from rl.test.ppo_test import run_test_suite, run_test_once, _resolve_test_path 
+from rl.test.ppo_test import _resolve_test_path, run_test_once, run_test_suite
 
 # RAM記憶體觀察用
 proc = psutil.Process(os.getpid())
