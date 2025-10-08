@@ -340,6 +340,7 @@ if __name__ == "__main__":
                     log_dict = {}
                     panel_imgs = []
 
+                    """
                     # Argmax：數值 + 單年圖
                     for y in years:
                         if y not in results_ev:
@@ -350,7 +351,7 @@ if __name__ == "__main__":
                             img = wandb.Image(r["fig"], caption=f"Argmax {y}")
                             panel_imgs.append(img)
                             plt.close(r["fig"])
-
+                    """
                     # EV-greedy：數值 + 單年圖
                     panel_imgs_ev = []
                     for y in years:

@@ -3,7 +3,7 @@ training:
   n_episodes: 5000          # 總訓練集數
   seed: 42                  # 隨機種子
   upload_wandb: true        # 要不要上傳到 W&B
-  ckpt_freq: 10            # 每多少 episodes 存一次 checkpoint
+  ckpt_freq: 20            # 每多少 episodes 存一次 checkpoint
   max_ckpts: 10              # 最多保留的 checkpoint 數
   load_checkpoint: false     # 是否從檢查點載入（未用）
 
@@ -56,7 +56,7 @@ logging:
   save_trades: false
   trade_sample_freq: 1
   wandb_every: 1
-  test_every: 1                # ← 新增：每 10 個 outer-episode 跑一次 2020–2024 測試
+  test_every: 20                # ← 新增：每 10 個 outer-episode 跑一次 2020–2024 測試
 
 ppo:
   # 執行設備與並行
