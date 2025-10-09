@@ -327,6 +327,9 @@ def run_test_suite(
     results = {}
     overlay_fig = None # 用於 overlay 的參考，避免外部再收集
 
+    avg_returns = []
+    avg_mdds = []
+
     for y in years:
         data_path = _resolve_test_path(ROOT, cfg, y)
         if not data_path.exists():
@@ -362,6 +365,16 @@ def run_test_suite(
             )
             trades = None
 
+        # 結果存入 results，供後面平均計算
+        results[y] = {
+            "total_return": tr,
+            "max_drawdown": mdd,
+            "df_perf": df_perf,
+            "df_baseline": df_base,
+            "fig": fig,
+        }
+
+
     # 多年份疊圖
     if overlay_plot and len(results) > 0:
         overlay_fig = plt.figure(figsize=(10, 6))
@@ -380,6 +393,7 @@ def run_test_suite(
 
         # 統一放在 results[-1]
         results["_overlay_fig"] = overlay_fig
+        """
         results[y] = {
             "total_return": tr,
             "max_drawdown": mdd,
@@ -388,6 +402,31 @@ def run_test_suite(
             "df_perf": df_perf,
             "df_baseline": df_base,
         }
+        """
+
+    # === 在 wandb 紀錄每次測試平均表現 ===
+    try:
+        import wandb
+
+        if wandb.run is not None:
+            avg_returns = [r["total_return"] for r in results.values() if "total_return" in r]
+            avg_mdds = [r["max_drawdown"] for r in results.values() if "max_drawdown" in r]
+
+            mean_return = sum(avg_returns) / len(avg_returns) if avg_returns else float("nan")
+            mean_mdd = sum(avg_mdds) / len(avg_mdds) if avg_mdds else float("nan")
+
+            wandb.log({
+                "test/mean_return": mean_return,
+                "test/mean_max_drawdown": mean_mdd,
+            })
+            print(f"[INFO] Logged test mean_return={mean_return:.4f}, mean_max_drawdown={mean_mdd:.4f} to wandb.")
+        else:
+            print("[WARN] wandb not initialized; skipped logging.")
+    except ImportError:
+        print("[WARN] wandb not installed, skip logging.")
+    except Exception as e:
+        print(f"[WARN] Failed to log to wandb: {e}")
+
 
     return results
 
