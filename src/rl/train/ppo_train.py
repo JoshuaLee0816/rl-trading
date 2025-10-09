@@ -354,6 +354,17 @@ if __name__ == "__main__":
                         }
                     except Exception as e:
                         print(f"[WARN] EV-greedy 測試 {y} 失敗：{e}")
+                # === 🟩 新增：五年平均後再 log 一次到 wandb ===
+                if upload_wandb and len(results_ev) > 0:
+                    avg_return = np.mean([v["total_return"] for v in results_ev.values()])
+                    avg_mdd = np.mean([v["max_drawdown"] for v in results_ev.values()])
+
+                    wandb.log({
+                        "test/mean_return": avg_return,
+                        "test/mean_max_drawdown": avg_mdd,
+                    }, step=ep)
+
+                    print(f"[INFO] Logged 5-year AVERAGE test result: mean_return={avg_return:.4f}, mean_mdd={avg_mdd:.4f}")
 
                 if len(results_ev) == 0 and len(results_ev) == 0:
                     print("[WARN] run_test_suite / EV-greedy 都沒有任何年份成功（多半是找不到測試檔）。不上傳圖。")
