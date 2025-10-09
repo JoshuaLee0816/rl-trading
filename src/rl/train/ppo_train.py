@@ -215,6 +215,7 @@ if __name__ == "__main__":
             prev_V = torch.tensor([i["V"] for i in infos_list], dtype=torch.float32)
             daily_returns = []
             ep_trade_counts = [0 for _ in range(n_envs)]
+            ep_rewards = []
 
             start = time.perf_counter()
             for t in range(agent.n_steps):
@@ -224,6 +225,7 @@ if __name__ == "__main__":
                 )
                 actions_np = np.asarray(actions_tuple, dtype=np.int64)
                 obs_nd, rewards, dones, truncs, infos = envs.step(actions_np)
+                ep_rewards.extend(rewards.tolist())
                 obs = agent.obs_to_tensor(obs_nd)
                 infos_list = split_infos(infos)
 
@@ -255,6 +257,14 @@ if __name__ == "__main__":
             #print(f"[DEBUG] Rollout (env interaction) 花費 {end - start:.3f} 秒")
 
             agent.update()
+
+            # === Reward 統計 ===
+            if len(ep_rewards) > 0:
+                reward_sum = float(np.sum(ep_rewards))
+                reward_mean = float(np.mean(ep_rewards))
+            else:
+                reward_sum, reward_mean = 0.0, 0.0
+
 
             metrics = compute_episode_metrics(daily_returns)
             days = metrics["days"]
@@ -291,7 +301,8 @@ if __name__ == "__main__":
                     "train/avg_trade_count": avg_trades,
                     "train/mdd%": ep_mdd,
                     #"eval/total_return%": float(metrics["total_return"] * 100.0), #這個是指整個episodes訓練完成後的總報酬
-                    "eval/annualized_pct": float(metrics["annualized_pct"] *100.0),
+                    "eval/annualized_pct": float(metrics["annualized_pct"]),
+                    "eval/reward_mean": reward_mean,
                 }, step=total_ep)
 
             # === 每 test_every 個 outer-episode 跑一次 5 年測試並上傳到 W&B ===
