@@ -56,12 +56,12 @@ logging:
   save_trades: false
   trade_sample_freq: 1
   wandb_every: 1
-  test_every: 100                # ← 新增：每 10 個 outer-episode 跑一次 2020–2024 測試
+  test_every: 10                # ← 新增：每 10 個 outer-episode 跑一次 2020–2024 測試
 
 ppo:
   # 執行設備與並行
   device: "mps"                  # mac 上會用 MPS；Windows/無 MPS 會自動 fallback 到 CPU
-  num_envs: 4
+  num_envs: 2
   use_subproc: false
 
   # 演算法超參數

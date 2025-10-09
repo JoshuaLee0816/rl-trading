@@ -90,7 +90,11 @@ def compute_episode_metrics(daily_returns: list[torch.Tensor]) -> dict:
     total_return = (torch.exp(R_total) - 1.0).item()
     days = daily_returns.numel()
     annualized_return = ((1.0 + total_return) ** (252.0 / days) - 1.0)
-    return {"R_total": R_total, "total_return": total_return, "days": days, "annualized_pct": annualized_return * 100.0}
+
+    # 估算這段相當於幾年期（方便 debug）
+    segment_years = days / 252.0
+
+    return {"R_total": R_total, "total_return": total_return, "days": days, "segment_years": segment_years, "annualized_pct": annualized_return * 100.0}
 
 # endregion 小工具
 
@@ -255,6 +259,12 @@ if __name__ == "__main__":
             metrics = compute_episode_metrics(daily_returns)
             days = metrics["days"]
 
+            # === [新增] 檢查 total_return 合理性 ===
+            total_return_pct = metrics["total_return"] * 100
+            annualized_pct = metrics["annualized_pct"]
+            segment_years = metrics["segment_years"]
+            #print(f"[CHECK] Ep{ep}: annualized% = {annualized_pct:.2f}% | total={total_return_pct:.2f}% | days={days} (~{segment_years:.2f}y)")
+
             # 計算平均年化交易次數 (次／年) ===
             final_trade_counts = [i.get("trade_count", 0) for i in infos_list]
             avg_trades_per_episode = float(np.mean(final_trade_counts))
@@ -280,8 +290,8 @@ if __name__ == "__main__":
                     "train/entropy": agent.entropy_log[-1] if agent.entropy_log else None,
                     "train/avg_trade_count": avg_trades,
                     "train/mdd%": ep_mdd,
-                    "eval/total_return%": float(metrics["total_return"] * 100.0), #這個是指整個episodes訓練完成後的總報酬
-                    #"eval/annualized_pct": float(metrics["annualized_pct"]),
+                    #"eval/total_return%": float(metrics["total_return"] * 100.0), #這個是指整個episodes訓練完成後的總報酬
+                    "eval/annualized_pct": float(metrics["annualized_pct"] *100.0),
                 }, step=total_ep)
 
             # === 每 test_every 個 outer-episode 跑一次 5 年測試並上傳到 W&B ===
