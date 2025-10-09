@@ -418,8 +418,7 @@ if __name__ == "__main__":
 
             # RAM記憶體檢查用
             rss = proc.memory_info().rss / 1024**3  # 常駐記憶體 (GB)
-            vms = proc.memory_info().vms / 1024**3  # 虛擬記憶體 (GB)
-            print(f"[MEM] ep={ep} | RSS={rss:.2f} GB | VMS={vms:.2f} GB")
+            print(f"[MEM] ep={ep} | RSS={rss:.2f} GB ")
 
     finally:
         try:
