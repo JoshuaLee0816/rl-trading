@@ -29,7 +29,7 @@ data/processed/
 # --- 日誌 ---
 logs/
 *.log
-.csv
+*.csv
 
 # Ignore wandb logs
 wandb/
