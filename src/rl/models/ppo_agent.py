@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
+from collections import deque
 
 import wandb
 
@@ -105,7 +106,10 @@ class PPOAgent:
         self.QMAX = int(qmax_per_trade)
         self.A = self.N * self.QMAX + self.N + 1
         self.config = config
-        self.entropy_log, self.actor_loss_log, self.critic_loss_log = [], [], []
+        #self.entropy_log, self.actor_loss_log, self.critic_loss_log = [], [], []
+        self.entropy_log = deque(maxlen=1000)
+        self.actor_loss_log = deque(maxlen=1000)
+        self.critic_loss_log = deque(maxlen=1000)
 
         # === Hyperparams ===
         ppo_cfg = config.get("ppo", {})
