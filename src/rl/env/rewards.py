@@ -30,7 +30,7 @@ def daily_return(env, action, side, p_close, t):
 
     # Transaction Cost
     if side in ("BUY", "SELL_ALL"):
-        reward -= 0.00005
+        reward *= 0.999
 
     # Penalty
     penalty = torch.tensor(0.0, device=env.device)
@@ -45,8 +45,8 @@ def daily_return(env, action, side, p_close, t):
 
     # === Penalty (MDD懲罰) ===
     dd_from_peak = (V_new - env.peak_value) / env.peak_value
-    if dd_from_peak < -0.15:  # 超過 -15% 回撤
-        mdd_penalty = dd_from_peak * 0.5  # 懲罰力度可調
+    if dd_from_peak < -0.1:  # 超過 -10% 回撤
+        mdd_penalty = dd_from_peak * 0.8  # 懲罰力度可調
         reward += mdd_penalty
 
     return reward, {

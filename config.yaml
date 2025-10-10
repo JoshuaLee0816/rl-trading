@@ -21,7 +21,7 @@ model:
       n_heads: 2
       n_layers: 2
       dropout: 0.1
-      k_window: 20
+      k_window: 30
   n_anchor: 0
 
 data:
@@ -44,10 +44,10 @@ safety:
 
 environment:
   initial_cash: 100000
-  lookback: 20
+  lookback: 30
   reward_mode: "daily_return"   # "daily_return" | "total_profit"
   action_mode: "discrete"
-  max_holdings: 3
+  max_holdings: 2
   qmax_per_trade: 10
 
 logging:
@@ -56,19 +56,19 @@ logging:
   save_trades: false
   trade_sample_freq: 1
   wandb_every: 1
-  test_every: 1                # 每N個 outer-episode 跑一次 2020–2024 測試
+  test_every: 100                # 每N個 outer-episode 跑一次 2020–2024 測試
 
 ppo:
   # 執行設備與並行
   device: "mps"                  # mac 上會用 MPS；Windows/無 MPS 會自動 fallback 到 CPU
-  num_envs: 2
+  num_envs: 4
   use_subproc: false
 
   # 演算法超參數
-  gamma: 0.99
+  gamma: 0.995
   gae_lambda: 0.95
-  clip_epsilon: 0.2
-  entropy_coef: 0.05
+  clip_epsilon: 0.1
+  entropy_coef: 0.01
   value_coef: 0.5
 
   # 最佳化與批次
