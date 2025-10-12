@@ -196,6 +196,21 @@ if __name__ == "__main__":
         config=config,
     )
 
+    # === 自動載入最佳 checkpoint（若存在） ===
+    ckpt_dir = ROOT / "logs/runs"
+    actor_best = ckpt_dir / "actor_best.pt"
+    critic_best = ckpt_dir / "critic_best.pt"
+
+    if actor_best.exists() and critic_best.exists():
+        try:
+            agent.actor.load_state_dict(torch.load(actor_best, map_location=agent.device))
+            agent.critic.load_state_dict(torch.load(critic_best, map_location=agent.device))
+            print(f"[INFO] 成功載入續訓模型：{actor_best.name}, {critic_best.name}")
+        except Exception as e:
+            print(f"[WARN] 載入續訓模型失敗：{e}")
+    else:
+        print("[INFO] 找不到先前最佳模型，從頭開始訓練")
+
     print("=== [DEBUG TRAIN LOOP INIT] ===")
     print(f"n_envs={n_envs}, n_steps={agent.n_steps}, batch_size={agent.batch_size}, epochs={agent.epochs}")
     print(f"Stocks={num_stocks}, Lookback={lookback}, Features={len(selected_feats) if selected_feats else 0}")
@@ -371,6 +386,17 @@ if __name__ == "__main__":
                     }, step=total_ep)
 
                     print(f"[INFO] Logged 5-year AVERAGE test result: mean_return={avg_return:.4f}, mean_mdd={avg_mdd:.4f}")
+
+                    # === 若五年平均報酬創新高，自動儲存 best checkpoint ===
+                    global best_avg_return
+                    if "best_avg_return" not in globals():
+                        best_avg_return = -9999.0
+
+                    if avg_return > best_avg_return:
+                        best_avg_return = avg_return
+                        torch.save(agent.actor.state_dict(), ckpt_dir / "actor_best.pt")
+                        torch.save(agent.critic.state_dict(), ckpt_dir / "critic_best.pt")
+                        print(f"[INFO] 🏆 更新最佳模型：mean_return={avg_return:.4f}")
 
                 if len(results_ev) == 0 and len(results_ev) == 0:
                     print("[WARN] run_test_suite / EV-greedy 都沒有任何年份成功（多半是找不到測試檔）。不上傳圖。")

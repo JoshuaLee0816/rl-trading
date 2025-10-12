@@ -78,14 +78,14 @@ ppo:
   n_steps: 512
   epochs: 3
   # === KL-aware PPO ===
-  target_kl: 0.02           # 常見 0.01~0.05；交易/多動作可 0.02~0.03
-  kl_stop_mult: 1.5         # KL > 1.5×target_kl → 早停當輪 epoch
-  kl_low_mult: 0.5          # KL < 0.5×target_kl → 當作更新太小
+  target_kl: 0.025           # 常見 0.01~0.05；交易/多動作可 0.02~0.03
+  kl_stop_mult: 1.8         # KL > N×target_kl → 早停當輪 epoch
+  kl_low_mult: 0.8          # KL < N×target_kl → 當作更新太小
   adapt_clip: true          # 啟用浮動 clip（可先 true，想單做早停就 false）
   clip_min: 0.05
-  clip_max: 0.30
-  clip_up: 1.25             # KL 太小 → clip *= 1.25（放寬）
-  clip_down: 0.80           # KL 太大 → clip *= 0.80（收緊）
+  clip_max: 0.25
+  clip_up: 1.20             # KL 太小 → clip *= 1.2（放寬）
+  clip_down: 0.85           # KL 太大 → clip *= 0.85（收緊）
 
 
   # 網路結構 two hidden layers in current
