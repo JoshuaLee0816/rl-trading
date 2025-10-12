@@ -256,7 +256,8 @@ if __name__ == "__main__":
             end = time.perf_counter()
             #print(f"[DEBUG] Rollout (env interaction) 花費 {end - start:.3f} 秒")
 
-            agent.update()
+            #agent.update()
+            logs = agent.update()
 
             # === Reward 統計 ===
             if len(ep_rewards) > 0:
@@ -300,6 +301,11 @@ if __name__ == "__main__":
                     "train/entropy": agent.entropy_log[-1] if agent.entropy_log else None,
                     "train/avg_trade_count": avg_trades,
                     "train/mdd%": ep_mdd,
+                    "train/policy_kl": logs.get("policy_kl"),
+                    "train/clip_eps_now": logs.get("clip_eps_now"),
+                    "train/kl_early_stop": logs.get("kl_early_stop"),
+                    "train/entropy_coef_now": logs.get("entropy_coef_now"),
+     
                     #"eval/total_return%": float(metrics["total_return"] * 100.0), #這個是指整個episodes訓練完成後的總報酬
                     "eval/annualized_pct": float(metrics["annualized_pct"]),
                     "eval/reward_mean": reward_mean,
