@@ -57,9 +57,76 @@ def daily_return(env, action, side, p_close, t):
 
 
 # region 取得def
+
+# region Strong_signal_return
+# region 強化訓練績效 Reward
+def strong_signal_return(env, action, side, p_close, t):
+    """
+    Reward = 強化梯度版日報酬
+    目標：提升訓練初期學習速度與穩定度
+
+    結構：
+        r = α * (portfolio_return - β * baseline_return)
+            - λ1 * transaction_cost
+            - λ2 * floating_loss_penalty
+            - λ3 * drawdown_penalty
+    """
+
+    # === Portfolio Value 更新 ===
+    V_prev = env.portfolio_value
+    V_new = env._mark_to_market(p_close)
+    env.portfolio_value = V_new
+
+    env.peak_value = torch.max(env.peak_value, V_new)
+
+    # === 核心報酬 ===
+    portfolio_return = torch.log(
+        torch.clamp(V_new, min=1e-12) / torch.clamp(V_prev, min=1e-12)
+    )
+    baseline_return = torch.log(env.baseline_close[t + 1] / env.baseline_close[t])
+
+    # === 放大回報信號，降低baseline權重 ===
+    alpha = 80.0   # 放大倍率 (強化梯度)
+    beta = 0.3     # baseline 權重
+    reward = alpha * (portfolio_return - beta * baseline_return)
+
+    # === Transaction cost ===
+    if side in ("BUY", "SELL_ALL"):
+        reward -= 0.02  # 避免過度交易但不削弱信號
+
+    # === 平滑浮虧 penalty ===
+    penalty = torch.tensor(0.0, device=env.device)
+    for i in env.slots:
+        if i is not None and env.avg_costs[i] > 0:
+            cur_price = env.prices_close[env._t, i]
+            floating_ret = (cur_price - env.avg_costs[i]) / env.avg_costs[i]
+            if floating_ret < 0:
+                # 改用線性平滑懲罰
+                penalty += (-floating_ret) * 0.002
+    reward -= penalty
+
+    # === Drawdown penalty ===
+    dd_from_peak = (V_new - env.peak_value) / env.peak_value
+    if dd_from_peak < -0.15:
+        reward += dd_from_peak * 0.05  # 線性懲罰，避免爆梯度
+
+    # === Clip reward to keep gradient stable ===
+    reward = torch.clamp(reward, -1.0, 1.0)
+
+    return reward, {
+        "baseline_return": float(baseline_return.item()),
+        "mdd": float(dd_from_peak.item()),
+        "penalty": float(penalty.item())
+    }
+# endregion 強化訓練績效 Reward
+
 def get_reward_fn(mode: str):
     if mode == "daily_return":
         return daily_return
+    
+    elif mode == "strong_signal_return":
+        return strong_signal_return
+    
     else:
         raise ValueError(f"Unknown reward mode: {mode}")
 
