@@ -333,19 +333,6 @@ if __name__ == "__main__":
                             "critic": agent.critic.state_dict()}, tmp_ckpt)
 
                 years = (2020, 2021, 2022, 2023, 2024)
-                """
-                # 先跑 Argmax（沿用既有 run_test_suite）
-                results_arg = run_test_suite(
-                    actor_path=tmp_ckpt,
-                    config_path=ROOT / "config.yaml",
-                    years=years,
-                    plot=True,
-                    save_trades=True,
-                    verbose=True,
-                )
-                """
-
-                # 再跑 EV-greedy（逐年呼叫 run_test_once(policy="ev_greedy")）
                 with open(ROOT / "config.yaml", "r", encoding="utf-8") as _f:
                     _cfg_for_test = yaml.safe_load(_f)
 
@@ -355,98 +342,87 @@ if __name__ == "__main__":
                     if not data_path.exists():
                         print(f"[WARN] EV-greedy 測試找不到 {y} 的檔案：{data_path}")
                         continue
+
                     try:
-                        tr, mdd, _df_perf, df_base, fig, _actions = run_test_once(  # <<< 多接一個 _actions
+                        tr, mdd, _df_perf, df_base, fig, _actions = run_test_once(
                             actor_path=str(tmp_ckpt),
                             data_path=str(data_path),
                             config_path=str(ROOT / "config.yaml"),
-                            plot=True, 
+                            plot=True,
                             save_trades=True,
                             tag=f"{y}_EV_ep{ep}",
                             verbose=True,
                             return_fig=True,
                             policy="ev_greedy"
                         )
+
+                        trade_count = len(_actions) if _actions is not None else 0
                         results_ev[y] = {
                             "total_return": tr,
                             "max_drawdown": mdd,
+                            "trade_count": trade_count,
                             "fig": fig,
-                            "trades": None,
                         }
+
+                        # === 在圖上右下角標註交易數與報酬率 ===
+                        ax = fig.axes[0]
+                        text_str = f"Trades: {trade_count}\nReturn: {tr*100:+.2f}%"
+                        ax.text(0.98, 0.02, text_str,
+                                transform=ax.transAxes,
+                                fontsize=11, color="black",
+                                ha="right", va="bottom",
+                                bbox=dict(boxstyle="round,pad=0.4",
+                                        facecolor="white", alpha=0.6))
+
                     except Exception as e:
                         print(f"[WARN] EV-greedy 測試 {y} 失敗：{e}")
-                # === 五年平均後再 log 一次到 wandb ===
+
+                # === 五年平均後上傳到 W&B ===
                 if upload_wandb and len(results_ev) > 0:
                     avg_return = np.mean([v["total_return"] for v in results_ev.values()])
                     avg_mdd = np.mean([v["max_drawdown"] for v in results_ev.values()])
+                    avg_trade_count = np.mean([v["trade_count"] for v in results_ev.values()])
 
                     wandb.log({
                         "test/mean_return": avg_return,
                         "test/mean_max_drawdown": avg_mdd,
+                        "test/mean_trade_count": avg_trade_count,
                     }, step=total_ep)
 
-                    print(f"[INFO] Logged 5-year AVERAGE test result: mean_return={avg_return:.4f}, mean_mdd={avg_mdd:.4f}")
+                    print(f"[INFO] 5Y avg: return={avg_return:.4f}, "
+                        f"mdd={avg_mdd:.4f}, trades={avg_trade_count:.1f}")
 
-                    # === 若五年平均報酬創新高，自動儲存 best checkpoint ===
+                    # === 更新最佳模型 ===
                     global best_avg_return
                     if "best_avg_return" not in globals():
                         best_avg_return = -9999.0
-
                     if avg_return > best_avg_return:
                         best_avg_return = avg_return
                         torch.save(agent.actor.state_dict(), ckpt_dir / "actor_best.pt")
                         torch.save(agent.critic.state_dict(), ckpt_dir / "critic_best.pt")
-                        print(f"[INFO] 🏆 更新最佳模型：mean_return={avg_return:.4f}")
+                        print(f"[INFO] 🏆 更新最佳模型 mean_return={avg_return:.4f}")
 
-                if len(results_ev) == 0 and len(results_ev) == 0:
-                    print("[WARN] run_test_suite / EV-greedy 都沒有任何年份成功（多半是找不到測試檔）。不上傳圖。")
+                if len(results_ev) == 0:
+                    print("[WARN] EV-greedy 測試無成功年份，略過上傳。")
                 else:
                     log_dict = {}
-                    panel_imgs = []
-
-                    """
-                    # Argmax：數值 + 單年圖
-                    for y in years:
-                        if y not in results_ev:
-                            continue
-                        r = results_ev[y]
-                        # 只留面板，不上傳單項數值與單張圖
-                        if r["fig"] is not None:
-                            img = wandb.Image(r["fig"], caption=f"Argmax {y}")
-                            panel_imgs.append(img)
-                            plt.close(r["fig"])
-                    """
-                    # EV-greedy：數值 + 單年圖
                     panel_imgs_ev = []
-                    for y in years:
-                        if y not in results_ev:
-                            continue
-                        r = results_ev[y]
-                        # 只留面板，不上傳單項數值與單張圖
+                    for y, r in results_ev.items():
                         if r["fig"] is not None:
                             img = wandb.Image(r["fig"], caption=f"EV-greedy {y}")
                             panel_imgs_ev.append(img)
                             plt.close(r["fig"])
 
-                    # 面板：僅保留一個分類，把兩套策略合併在一個面板裡
-                    panel_both = panel_imgs + panel_imgs_ev
-                    if panel_both:
-                        log_dict["test/panel"] = panel_both  # ← 只留這個分類鍵
+                    if panel_imgs_ev:
+                        log_dict["test/panel"] = panel_imgs_ev
+                        wandb.log(log_dict, step=total_ep)
 
-                    # 保留最近 max_ckpts 次 test 結果（本地用）
-                    if upload_wandb:
-                        recent = {}
-                        recent.update({k:v for k,v in log_dict.items() if isinstance(v, (int, float))})
-                        recent_test_logs.append(recent)
-
-                    # W&B 一次 log
-                    wandb.log(log_dict, step=total_ep)
-                
-                # 清理臨時 ckpt
+                # === 清理臨時 ckpt ===
                 try:
                     tmp_ckpt.unlink(missing_ok=True)
                 except Exception:
                     pass
+
 
             # RAM記憶體檢查用
             rss = proc.memory_info().rss / 1024**3  # 常駐記憶體 (GB)

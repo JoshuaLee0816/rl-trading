@@ -19,7 +19,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-# === 專案路徑 ===
+# region 專案路徑
 HERE = Path(__file__).resolve()
 SRC_DIR = HERE.parents[2]
 ROOT = HERE.parents[3]
@@ -224,28 +224,42 @@ def run_test_once(
             print(f"[WARN] Baseline unavailable: {e}")
         df_baseline = pd.DataFrame(index=df_perf.index, data={"baseline": float("nan")})    
 
-    # === 繪圖 ===
+    # 繪圖
     fig = None
     if plot:
         fig = plt.figure(figsize=(10, 6))
         plt.plot(df_perf.index, df_perf["value"], label="Agent Portfolio")
         plt.plot(df_baseline.index, df_baseline["baseline"], label="Baseline (0050)", linestyle="--")
-        # === 加交易標記 ===
+        # 交易標記
         if len(actions) > 0:   # 這裡直接用 actions
             df_trades = pd.DataFrame(actions, columns=["date", "side", "stock_id", "lots", "cash", "value"])
             df_trades["date"] = pd.to_datetime(df_trades["date"])
 
-            # 買點 (Buy) → 綠色三角形
+            # Buy → 綠色三角形
             buy_points = df_trades[df_trades["side"] == "BUY"]
             plt.scatter(buy_points["date"], buy_points["value"],
                         marker="^", color="green", s=80, label="Buy")
 
-            # 賣點 (Sell) → 紅色倒三角
+            # Sell → 紅色倒三角
             sell_points = df_trades[df_trades["side"] == "SELL_ALL"]
             plt.scatter(sell_points["date"], sell_points["value"],
                         marker="v", color="red", s=80, label="Sell")
 
         plt.title(f"Portfolio Value Over Time ({tag})")
+
+        # 在圖上右上角顯示交易次數與報酬率
+        trade_count = len(trade_records)
+        return_pct = total_return * 100
+        text_str = f"Trades: {trade_count}\nReturn: {return_pct:+.2f}%"
+        plt.text(
+            0.98, 0.02, text_str,
+            transform=plt.gca().transAxes,
+            fontsize=11,
+            color="black",
+            ha="right", va="bottom",
+            bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.6)
+        )
+
         plt.xlabel("Date")
         plt.ylabel("Value")
         plt.legend()
@@ -309,6 +323,7 @@ def _resolve_test_path(root: Path, cfg: dict, year: int) -> Path:
     p_csv     = root / "data" / "processed" / f"test_{year}.csv"
     return p_parquet if p_parquet.exists() else p_csv
 
+# region run_test_suite
 def run_test_suite(
     actor_path: Path,
     config_path: Path,

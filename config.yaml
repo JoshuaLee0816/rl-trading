@@ -45,7 +45,7 @@ safety:
 environment:
   initial_cash: 100000
   lookback: 30
-  reward_mode: "daily_return"   # "daily_return" | "total_profit"
+  reward_mode: "strong_signal_return"   # "daily_return" | "total_profit"| "strong_signal_return"
   action_mode: "discrete"
   max_holdings: 2
   qmax_per_trade: 10

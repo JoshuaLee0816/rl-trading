@@ -59,7 +59,6 @@ def daily_return(env, action, side, p_close, t):
 # region 取得def
 
 # region Strong_signal_return
-# region 強化訓練績效 Reward
 def strong_signal_return(env, action, side, p_close, t):
     """
     Reward = 強化梯度版日報酬
