@@ -248,9 +248,9 @@ def run_test_once(
         plt.title(f"Portfolio Value Over Time ({tag})")
 
         # 在圖上右上角顯示交易次數與報酬率
-        trade_count = len(trade_records)
+        sell_count = sum(1 for r in trade_records if r["action"] == "SELL_ALL")
         return_pct = total_return * 100
-        text_str = f"Trades: {trade_count}\nReturn: {return_pct:+.2f}%"
+        text_str = f"Trades: {sell_count}\nReturn: {return_pct:+.2f}%"
         plt.text(
             0.98, 0.02, text_str,
             transform=plt.gca().transAxes,
