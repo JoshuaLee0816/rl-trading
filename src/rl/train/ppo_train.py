@@ -42,7 +42,7 @@ if str(SRC_DIR) not in sys.path:
 from rl.env.StockTradingEnv import StockTradingEnv
 # === 模組 ===
 from rl.models.ppo_agent import PPOAgent
-from rl.test.ppo_test import _resolve_test_path, run_test_once, run_test_suite
+from rl.test.ppo_test import _resolve_test_path, run_test_once
 
 # RAM記憶體觀察用
 proc = psutil.Process(os.getpid())
