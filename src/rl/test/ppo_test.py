@@ -248,7 +248,10 @@ def run_test_once(
         plt.title(f"Portfolio Value Over Time ({tag})")
 
         # 在圖上右上角顯示交易次數與報酬率
-        sell_count = sum(1 for r in trade_records if r["action"] == "SELL_ALL")
+        sell_count = sum(
+            1 for r in trade_records
+            if r["action"] == "SELL_ALL" and r.get("lots", 0) > 0 and r.get("price") is not None
+        )
         return_pct = total_return * 100
         text_str = f"Trades: {sell_count}\nReturn: {return_pct:+.2f}%"
         plt.text(
@@ -300,7 +303,11 @@ def run_test_once(
 
     # 回傳邏輯統一，盡量不分支爆炸
     if return_fig and save_trades:
-        return total_return, max_drawdown, df_perf, df_baseline, fig, actions
+        sell_count = sum(
+            1 for r in trade_records
+            if r["action"] == "SELL_ALL" and r.get("lots", 0) > 0 and r.get("price") is not None
+        )
+        return total_return, max_drawdown, df_perf, df_baseline, fig, actions, sell_count
     if return_fig and not save_trades:
         return total_return, max_drawdown, df_perf, df_baseline, fig
     if not return_fig and save_trades:

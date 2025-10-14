@@ -344,7 +344,7 @@ if __name__ == "__main__":
                         continue
 
                     try:
-                        tr, mdd, _df_perf, df_base, fig, _actions = run_test_once(
+                        tr, mdd, _df_perf, df_base, fig, _actions, sell_count = run_test_once(
                             actor_path=str(tmp_ckpt),
                             data_path=str(data_path),
                             config_path=str(ROOT / "config.yaml"),
@@ -360,7 +360,7 @@ if __name__ == "__main__":
                         results_ev[y] = {
                             "total_return": tr,
                             "max_drawdown": mdd,
-                            "trade_count": trade_count,
+                            "trade_count": sell_count,
                             "fig": fig,
                         }
 
