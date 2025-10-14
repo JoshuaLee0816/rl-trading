@@ -366,13 +366,14 @@ if __name__ == "__main__":
 
                         # === 在圖上右下角標註交易數與報酬率 ===
                         ax = fig.axes[0]
-                        text_str = f"Trades: {trade_count}\nReturn: {tr*100:+.2f}%"
+                        text_str = f"Trades: {sell_count}\nReturn: {tr*100:+.2f}%"
                         ax.text(0.98, 0.02, text_str,
                                 transform=ax.transAxes,
                                 fontsize=11, color="black",
                                 ha="right", va="bottom",
                                 bbox=dict(boxstyle="round,pad=0.4",
                                         facecolor="white", alpha=0.6))
+                        #print(f"{y}: sell_count = {sell_count}")
 
                     except Exception as e:
                         print(f"[WARN] EV-greedy 測試 {y} 失敗：{e}")
@@ -416,7 +417,7 @@ if __name__ == "__main__":
                     if panel_imgs_ev:
                         log_dict["test/panel"] = panel_imgs_ev
                         wandb.log(log_dict, step=total_ep)
-
+                
                 # === 清理臨時 ckpt ===
                 try:
                     tmp_ckpt.unlink(missing_ok=True)
