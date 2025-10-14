@@ -353,7 +353,7 @@ if __name__ == "__main__":
                             tag=f"{y}_EV_ep{ep}",
                             verbose=True,
                             return_fig=True,
-                            policy="ev_greedy"
+                            policy="sample"
                         )
 
                         trade_count = len(_actions) if _actions is not None else 0

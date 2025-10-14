@@ -142,6 +142,13 @@ def run_test_once(
                     # 信心不足 : 選 HOLD
                     action_tuple = (2, 0, 0)   # MultiDiscrete([op, idx, q]) 裡 2=HOLD
 
+            elif policy == "sample":
+                # === 以機率抽樣動作（模擬訓練行為） ===
+                probs = torch.softmax(masked_logits, dim=-1).squeeze(0)
+                dist = torch.distributions.Categorical(probs)
+                a_flat = dist.sample()
+                action_tuple = agent.flat_to_tuple(int(a_flat.item()))
+
             elif policy == "ev_greedy":
                 # === Top-K EV-greedy：僅模擬前 K 個動作，依 Actor 機率挑選 ===
                 TOPK = 10  # 只模擬前 10 個動作
