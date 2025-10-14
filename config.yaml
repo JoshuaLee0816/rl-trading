@@ -56,7 +56,7 @@ logging:
   save_trades: false
   trade_sample_freq: 1
   wandb_every: 1
-  test_every: 1                # 每N個 outer-episode 跑一次 2020–2024 測試
+  test_every: 50                # 每N個 outer-episode 跑一次 2020–2024 測試
 
 ppo:
   # 執行設備與並行
