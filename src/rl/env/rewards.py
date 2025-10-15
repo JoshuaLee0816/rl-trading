@@ -55,9 +55,6 @@ def daily_return(env, action, side, p_close, t):
     }
 # endregion Daily Return
 
-
-# region 取得def
-
 # region Strong_signal_return
 def strong_signal_return(env, action, side, p_close, t):
     """
@@ -85,7 +82,7 @@ def strong_signal_return(env, action, side, p_close, t):
     baseline_return = torch.log(env.baseline_close[t + 1] / env.baseline_close[t])
 
     # === 放大回報信號，降低baseline權重 ===
-    alpha = 80.0   # 放大倍率 (強化梯度)
+    alpha = 8.0   # 放大倍率 (強化梯度)
     beta = 0.3     # baseline 權重
     reward = alpha * (portfolio_return - beta * baseline_return)
 
@@ -101,17 +98,24 @@ def strong_signal_return(env, action, side, p_close, t):
             floating_ret = (cur_price - env.avg_costs[i]) / env.avg_costs[i]
             if floating_ret < 0:
                 # 改用線性平滑懲罰
-                penalty += (-floating_ret) * 0.002
+                penalty += (-floating_ret) * 0.02
     reward -= penalty
 
     # === Drawdown penalty ===
     dd_from_peak = (V_new - env.peak_value) / env.peak_value
     if dd_from_peak < -0.15:
-        reward += dd_from_peak * 0.05  # 線性懲罰，避免爆梯度
+        reward += dd_from_peak * 0.1  # 線性懲罰，避免爆梯度
 
     # === Clip reward to keep gradient stable ===
     reward = torch.clamp(reward, -1.0, 1.0)
 
+    # 觀察數量級用
+    """
+    print(f"[DEBUG] portfolio_return={portfolio_return.mean():.6f}, "
+          f"drawdown={dd_from_peak:.4f}, penalty={penalty.item():.4f}, "
+          f"reward={reward.mean():.4f}")
+    """
+    
     return reward, {
         "baseline_return": float(baseline_return.item()),
         "mdd": float(dd_from_peak.item()),

@@ -114,6 +114,8 @@ if __name__ == "__main__":
     ckpt_freq    = int(train_cfg.get("ckpt_freq", 50))
     max_ckpts    = int(train_cfg.get("max_ckpts", 5))
     upload_wandb = bool(train_cfg.get("upload_wandb", False))
+    resume_from_best = bool(train_cfg.get("resume_from_best", False))
+
     num_envs     = int(ppo_cfg.get("num_envs", 2))
     wandb_every  = int(log_cfg.get("wandb_every", 10))
     test_every   = int(log_cfg.get("test_every", train_cfg.get("test_every", 10)))
@@ -196,20 +198,24 @@ if __name__ == "__main__":
         config=config,
     )
 
-    # === 自動載入最佳 checkpoint（若存在） ===
+    # === 修改：依照 config 決定是否載入 best.pt ===
     ckpt_dir = ROOT / "logs/runs"
     actor_best = ckpt_dir / "actor_best.pt"
     critic_best = ckpt_dir / "critic_best.pt"
 
-    if actor_best.exists() and critic_best.exists():
-        try:
-            agent.actor.load_state_dict(torch.load(actor_best, map_location=agent.device))
-            agent.critic.load_state_dict(torch.load(critic_best, map_location=agent.device))
-            print(f"[INFO] 成功載入續訓模型：{actor_best.name}, {critic_best.name}")
-        except Exception as e:
-            print(f"[WARN] 載入續訓模型失敗：{e}")
+    if resume_from_best:
+        if actor_best.exists() and critic_best.exists():
+            try:
+                agent.actor.load_state_dict(torch.load(actor_best, map_location=agent.device))
+                agent.critic.load_state_dict(torch.load(critic_best, map_location=agent.device))
+                print(f"[INFO] ✅ 從 best.pt 續訓成功 ({actor_best.name}, {critic_best.name})")
+            except Exception as e:
+                print(f"[WARN] ⚠️ 續訓模型載入失敗，改為從頭訓練：{e}")
+        else:
+            print("[WARN] ⚠️ 找不到 best.pt，改為從頭訓練")
     else:
-        print("[INFO] 找不到先前最佳模型，從頭開始訓練")
+        print("[INFO] 🚀 resume_from_best=False，從頭開始訓練")
+
 
     print("=== [DEBUG TRAIN LOOP INIT] ===")
     print(f"n_envs={n_envs}, n_steps={agent.n_steps}, batch_size={agent.batch_size}, epochs={agent.epochs}")
