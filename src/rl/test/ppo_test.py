@@ -356,6 +356,10 @@ def run_test_random_start(
     feature_cols = full_cfg["data"]["features"]
     lookback = env_cfg["lookback"]
 
+    test_cfg = full_cfg.get("testing", {})
+    if isinstance(test_cfg, dict) and "n_runs" in test_cfg:
+        n_runs = test_cfg["n_runs"]
+
     # === 取得測試檔路徑 ===
     data_cfg = full_cfg["data"]
     root_dir = Path(config_path).resolve().parent

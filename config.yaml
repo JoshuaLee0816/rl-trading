@@ -92,3 +92,6 @@ ppo:
   # 網路結構 two hidden layers in current
   actor_hidden: 128
   critic_hidden: 64
+
+testing:
+  n_runs: 5      # run_test_random_start() 測試次數
