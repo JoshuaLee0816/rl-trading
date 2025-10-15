@@ -128,12 +128,34 @@ if __name__ == "__main__":
     qmax_per_trade = int(env_cfg.get("qmax_per_trade"))
 
     # region W&B 初始化
-    # W&B 初始化設定
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
     if upload_wandb:
-        wandb.init(project="rl-trading", name=f"run_{run_id}", job_type="train", config=ppo_cfg, settings=wandb.Settings(_disable_stats=True))
-        # 建立固定長度的存放圖表區
+        # === 從 config.yaml 收集實驗資訊 ===
+        test_cfg = config.get("testing", {})
+        env_cfg  = config.get("environment", {})
+        model = train_cfg.get("model")
+
+        # === 建立 W&B 初始化設定 ===
+        wandb.init(
+            project="rl-trading",
+            name=f"{model}_{run_id}",
+            job_type="train",
+            config={
+                "model": model,
+                "policy": test_cfg.get("policy", "argmax"),
+                "conf_threshold": test_cfg.get("conf_threshold"),
+                "reward_mode": env_cfg.get("reward_mode"),
+                "encoder": env_cfg.get("encoder", "mlp"),
+            },
+            settings=wandb.Settings(_disable_stats=True)
+        )
+
+        print(f"Policy = {test_cfg.get('policy', 'argmax')} | Reward = {env_cfg.get('reward_mode', 'daily_return')} | Encoder = {env_cfg.get('encoder', 'mlp')}")
+        
+        # === 建立固定長度的存放圖表區 ===
         recent_test_logs = deque(maxlen=max_ckpts)
+
 
     outdir = ROOT / log_cfg.get("outdir", "logs/runs")
     run_dir = outdir / f"run_{run_id}"
