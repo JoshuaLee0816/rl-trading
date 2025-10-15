@@ -389,14 +389,23 @@ if __name__ == "__main__":
                 # region Random_Start_Test
                 # 單一 Random-start 測試（從 2020~2024 整合檔隨機抽 5 段)
                 try:
+                    # 從 config 讀取測試策略設定
+                    test_cfg = _cfg_for_test.get("testing", {})
+                    test_policy = test_cfg.get("policy", "argmax")
+                    test_conf_threshold = float(test_cfg.get("conf_threshold", 0.75))
+                    test_n_runs = int(test_cfg.get("n_runs", 5))
+
+                    # 使用設定控制測試策略
                     random_result = run_test_random_start(
                         actor_path=str(tmp_ckpt),
                         config_path=str(ROOT / "config.yaml"),
-                        n_runs=5,                 # 抽 5 段
+                        n_runs=test_n_runs,
                         save_trades=True,
-                        plot=True,               
+                        plot=True,
                         tag=f"EV_ep{ep}",
-                        verbose=True
+                        verbose=True,
+                        policy=test_policy,                 
+                        conf_threshold=test_conf_threshold  
                     )
 
                     avg_return = random_result["total_return"]

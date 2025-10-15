@@ -138,8 +138,11 @@ def run_test_once(
                 if max_prob.item() >= conf_threshold:
                     action_tuple = agent.flat_to_tuple(int(a_flat.item()))
                 else:
-                    # 信心不足 : 選 HOLD
-                    action_tuple = (2, 0, 0)   # MultiDiscrete([op, idx, q]) 裡 2=HOLD
+                    # 🟩 低信心 → 改用隨機抽樣（符合 PPO 訓練時的行為）
+                    probs = probs.squeeze(0)
+                    dist = torch.distributions.Categorical(probs)
+                    sampled_a_flat = dist.sample()
+                    action_tuple = agent.flat_to_tuple(int(sampled_a_flat.item()))
 
             elif policy == "sample":
                 # === 以機率抽樣動作（模擬訓練行為） ===

@@ -87,4 +87,6 @@ ppo:
   critic_hidden: 64
 
 testing:
+  policy: "argmax"            # 可選 "argmax" / "sample" / "ev_greedy"
+  conf_threshold: 0.75        # 僅在 argmax 模式下使用
   n_runs: 3                   # run_test_random_start() 測試次數
