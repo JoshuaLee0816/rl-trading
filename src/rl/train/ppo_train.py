@@ -308,8 +308,6 @@ if __name__ == "__main__":
             mdd_list = [i.get("mdd", 0.0) for i in infos_list]
             ep_mdd = min(mdd_list) * 100  # ← episode 最大回撤 (%)
 
-            #print(f"[EP {ep}] days={metrics['days']} total_return={metrics['total_return']:.4f} "f"annualized={metrics['annualized_pct']:.2f}%")
-
             total_ep = ep * n_envs
             if total_ep % ckpt_freq == 0:
                 ckpt_path = save_checkpoint(run_dir, agent, ep)
@@ -396,7 +394,7 @@ if __name__ == "__main__":
                         config_path=str(ROOT / "config.yaml"),
                         n_runs=5,                 # 抽 5 段
                         save_trades=True,
-                        plot=True,                # ✅ 開啟繪圖
+                        plot=True,               
                         tag=f"EV_ep{ep}",
                         verbose=True
                     )
@@ -416,7 +414,7 @@ if __name__ == "__main__":
                             "fig": fig,
                         }
 
-                    print(f"[INFO] Random-start test avg: return={avg_return:.4f}, mdd={avg_mdd:.4f}, trades={avg_trade_count:.1f}")
+                    #print(f"[INFO] Random-start test avg: return={avg_return:.4f}, mdd={avg_mdd:.4f}, trades={avg_trade_count:.1f}")
 
                 except Exception as e:
                     print(f"[WARN] Random-start 測試失敗：{e}")

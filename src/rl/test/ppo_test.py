@@ -434,8 +434,6 @@ def run_test_random_start(
     mean_mdd = np.mean([r[1] for r in results]) if results else 0.0
     mean_trades = np.mean(all_sell_counts) if all_sell_counts else 0.0
 
-    print(f"[INFO] Random-start test avg: return={mean_return:.4f}, mdd={mean_mdd:.4f}, trades={mean_trades:.1f}")
-
     # === 回傳 ===
     return {
         "total_return": mean_return,
