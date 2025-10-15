@@ -1,18 +1,12 @@
 training:
-  model: "ppo"              # 控制哪個 model 執行
-  n_episodes: 5000          # 總訓練集數
-  seed: 42                  # 隨機種子
-  upload_wandb: true        # 要不要上傳到 W&B
-  ckpt_freq: 20            # 每多少 episodes 存一次 checkpoint
-  max_ckpts: 10              # 最多保留的 checkpoint 數
-  load_checkpoint: false     # 是否從檢查點載入（未用）
-  resume_from_best: false     # 若為 true，會自動載入 logs/runs/actor_best.pt
-
-  # 以下目前未在 src/rl/train/ppo_train.py 使用（保留以後擴充）
-  save_freq: 5              # 每幾集更新一次圖（目前未用）
-  update_every: 256         # 每幾步更新一次（未用）
-  warmup_steps: 10000       # 開始更新前先收集步數（未用）
-  grad_steps: 1             # 每次觸發連續更新幾次（未用）
+  model: "ppo"                # 控制哪個 model 執行
+  n_episodes: 5000            # 總訓練集數
+  seed: 42                    # 隨機種子
+  upload_wandb: true          # 要不要上傳到 W&B
+  ckpt_freq: 20               # 每多少 episodes 存一次 checkpoint
+  max_ckpts: 10               # 最多保留的 checkpoint 數
+  load_checkpoint: false      # 是否從檢查點載入（未用）
+  resume_from_best: false     # 若為 true，自動載入 logs/runs/actor_best.pt
 
 model:
   encoder:
@@ -25,31 +19,29 @@ model:
       k_window: 30
   n_anchor: 0
 
+
 data:
   file: "full_300/walk_forward/WF_train_2015_2019_full_300.parquet"
-  # 單一測試檔仍可用（部分工具會讀這個）
-  test_file: "full_300/walk_forward/WF_test_2020_2024_full_300.parquet"  #  整合檔 隨機測試用
-  # 新增：多年份測試檔（ppo_test 會優先找這個）
-  test_files:
+  test_file: "full_300/walk_forward/WF_test_2020_2024_full_300.parquet"  # 整合檔，用於隨機測試
+  test_files:                         # 多年份測試檔（ppo_test 會優先找這個）
     "2020": "full_300/walk_forward/WF_test_2020_full_300.parquet"
     "2021": "full_300/walk_forward/WF_test_2021_full_300.parquet"
     "2022": "full_300/walk_forward/WF_test_2022_full_300.parquet"
     "2023": "full_300/walk_forward/WF_test_2023_full_300.parquet"
     "2024": "full_300/walk_forward/WF_test_2024_full_300.parquet"
   features: ["open", "high", "low", "close", "volume", "MA5", "MA34", "MA60", "VMA20", "VMA60", "rsi14"]
-  # features: ['open','high','low','close','volume','cash_dividend','stock_dividend','MA5','MA20','MA34','MA60','MA120','VMA20','VMA60','rsi14','macd','macd_signal','macd_hist']
-
-safety:
-  cool_down_every: 500
-  sleep_seconds: 120
+  # features: ['open','high','low','close','volume','cash_dividend','stock_dividend',
+  #            'MA5','MA20','MA34','MA60','MA120','VMA20','VMA60','rsi14',
+  #            'macd','macd_signal','macd_hist']
 
 environment:
   initial_cash: 100000
   lookback: 30
-  reward_mode: "strong_signal_return"   # "daily_return" | "total_profit"| "strong_signal_return"
+  reward_mode: "strong_signal_return"   # "daily_return" | "total_profit" | "strong_signal_return"
   action_mode: "discrete"
   max_holdings: 2
   qmax_per_trade: 10
+
 
 logging:
   outdir: "logs/runs"
@@ -57,41 +49,42 @@ logging:
   save_trades: false
   trade_sample_freq: 1
   wandb_every: 1
-  test_every: 1                # 每N個 outer-episode 跑一次 2020–2024 測試
+  test_every: 1              # 每 N 個 outer-episode 跑一次 2020–2024 測試
+
 
 ppo:
-  # 執行設備與並行
-  device: "mps"                  # mac 上會用 MPS；Windows/無 MPS 會自動 fallback 到 CPU
+  # === 執行設備與並行 ===
+  device: "mps"              # mac 上用 MPS；Windows 無 MPS 則 fallback 到 CPU
   num_envs: 2
   use_subproc: false
 
-  # 演算法超參數
+  # === 演算法超參數 ===
   gamma: 0.995
   gae_lambda: 0.95
   clip_epsilon: 0.1
   entropy_coef: 0.01
   value_coef: 0.5
 
-  # 最佳化與批次
+  # === 最佳化與批次設定 ===
   actor_lr: 0.0001
   critic_lr: 0.0001
   batch_size: 256
   n_steps: 512
   epochs: 3
+
   # === KL-aware PPO ===
-  target_kl: 0.025           # 常見 0.01~0.05；交易/多動作可 0.02~0.03
-  kl_stop_mult: 1.8         # KL > N×target_kl → 早停當輪 epoch
-  kl_low_mult: 0.8          # KL < N×target_kl → 當作更新太小
-  adapt_clip: true          # 啟用浮動 clip（可先 true，想單做早停就 false）
+  target_kl: 0.025           # 常見 0.01~0.05；交易/多動作可設 0.02~0.03
+  kl_stop_mult: 1.8          # KL > N×target_kl → 早停當輪 epoch
+  kl_low_mult: 0.8           # KL < N×target_kl → 當作更新太小
+  adapt_clip: true           # 啟用浮動 clip（想單做早停就 false）
   clip_min: 0.05
   clip_max: 0.25
-  clip_up: 1.20             # KL 太小 → clip *= 1.2（放寬）
-  clip_down: 0.85           # KL 太大 → clip *= 0.85（收緊）
+  clip_up: 1.20              # KL 太小 → clip *= 1.2（放寬）
+  clip_down: 0.85            # KL 太大 → clip *= 0.85（收緊）
 
-
-  # 網路結構 two hidden layers in current
+  # === 網路結構 ===
   actor_hidden: 128
   critic_hidden: 64
 
 testing:
-  n_runs: 3      # run_test_random_start() 測試次數
+  n_runs: 3                   # run_test_random_start() 測試次數
