@@ -5,7 +5,6 @@ training:
   upload_wandb: true          # 要不要上傳到 W&B
   ckpt_freq: 20               # 每多少 episodes 存一次 checkpoint
   max_ckpts: 10               # 最多保留的 checkpoint 數
-  load_checkpoint: false      # 是否從檢查點載入（未用）
   resume_from_best: false     # 若為 true，自動載入 logs/runs/actor_best.pt
 
 model:
@@ -39,7 +38,7 @@ environment:
   lookback: 30
   reward_mode: "strong_signal_return"   # "daily_return" | "total_profit" | "strong_signal_return"
   action_mode: "discrete"
-  max_holdings: 2
+  max_holdings: 1
   qmax_per_trade: 10
 
 
@@ -49,13 +48,13 @@ logging:
   save_trades: false
   trade_sample_freq: 1
   wandb_every: 1
-  test_every: 1              # 每 N 個 outer-episode 跑一次 2020–2024 測試
+  test_every: 25              # 每 N 個 outer-episode 跑一次 2020–2024 測試
 
 
 ppo:
   # === 執行設備與並行 ===
   device: "mps"              # mac 上用 MPS；Windows 無 MPS 則 fallback 到 CPU
-  num_envs: 2
+  num_envs: 4
   use_subproc: false
 
   # === 演算法超參數 ===
@@ -89,4 +88,4 @@ ppo:
 testing:
   policy: "argmax"            # 可選 "argmax" / "sample" / "ev_greedy"
   conf_threshold: 0.75        # 僅在 argmax 模式下使用
-  n_runs: 3                   # run_test_random_start() 測試次數
+  n_runs: 5                   # run_test_random_start() 測試次數
