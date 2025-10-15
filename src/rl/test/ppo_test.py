@@ -61,7 +61,8 @@ def run_test_once(
     verbose=True,
     return_fig=False,
     policy="argmax",              
-    conf_threshold=0.75           
+    conf_threshold=0.75,
+    initial_cash=None,            
 ):        
     # === 載入 config.yaml ===
     with open(config_path, "r", encoding="utf-8") as f:
@@ -79,6 +80,10 @@ def run_test_once(
     df = df[keep_cols]
     ids = sorted(df["stock_id"].unique())
 
+    # override initial cash if provided
+    if initial_cash is not None:
+        env_cfg["initial_cash"] = initial_cash
+        
     # === 初始化環境（CPU） ===
     env = StockTradingEnv(
         df=df,
@@ -324,6 +329,7 @@ def run_test_once(
 
 
 # region run_test_random_start
+
 def run_test_random_start(
     actor_path,
     config_path,
@@ -347,6 +353,7 @@ def run_test_random_start(
     """
 
     import random
+    import matplotlib.pyplot as plt
 
     # === 載入 config.yaml ===
     with open(config_path, "r", encoding="utf-8") as f:
@@ -412,15 +419,55 @@ def run_test_random_start(
                 actor_path=str(actor_path),
                 data_path=str(tmp_path),
                 config_path=config_path,
-                plot=True,             # ✅ 完整 Portfolio 圖
+                plot=False,            # 先不畫，下面自己畫真實金額版
                 save_trades=save_trades,
                 tag=local_tag,
                 verbose=False,
                 return_fig=True,
                 policy=policy,
                 conf_threshold=conf_threshold,
+                initial_cash=init_cash, 
             )
 
+            # === 🎨 真實金額繪圖 ===
+            fig = plt.figure(figsize=(10, 6))
+            plt.plot(df_perf.index, df_perf["value"], label=f"Agent Portfolio (Init={init_cash:,.0f})")
+
+            # baseline 真實比例
+            try:
+                baseline_value = (df_base["baseline"] / df_base["baseline"].iloc[0]) * init_cash
+                plt.plot(df_base.index, baseline_value, label="Baseline (0050)", linestyle="--")
+            except Exception as e:
+                if verbose:
+                    print(f"[WARN] Baseline unavailable in random test: {e}")
+
+            # 交易標記
+            if len(actions) > 0:
+                df_trades = pd.DataFrame(actions, columns=["date", "side", "stock_id", "lots", "cash", "value"])
+                df_trades["date"] = pd.to_datetime(df_trades["date"])
+                buy_points = df_trades[df_trades["side"] == "BUY"]
+                plt.scatter(buy_points["date"], buy_points["value"], marker="^", color="green", s=80, label="Buy")
+                sell_points = df_trades[df_trades["side"] == "SELL_ALL"]
+                plt.scatter(sell_points["date"], sell_points["value"], marker="v", color="red", s=80, label="Sell")
+
+            # 標題 + 資訊文字
+            plt.title(f"Portfolio Value Over Time ({local_tag})")
+            return_pct = total_return * 100
+            text_str = f"Init: {init_cash:,.0f}\nReturn: {return_pct:+.2f}%\nTrades: {sell_count}"
+            plt.text(
+                0.98, 0.02, text_str,
+                transform=plt.gca().transAxes,
+                fontsize=11,
+                color="black",
+                ha="right", va="bottom",
+                bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.6)
+            )
+            plt.xlabel("Date")
+            plt.ylabel("Portfolio Value (NTD)")
+            plt.legend()
+            plt.grid(True)
+
+            # === 統計記錄 ===
             results.append((total_return, max_drawdown))
             figs.append(fig)
             all_sell_counts.append(sell_count)

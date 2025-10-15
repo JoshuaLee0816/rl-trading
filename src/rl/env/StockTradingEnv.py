@@ -189,7 +189,7 @@ class StockTradingEnv(gym.Env):
         self.peak_value = self.portfolio_value.clone()
 
         obs = self._make_obs(self._t)  # numpy array
-        action_mask_3d = self._build_action_mask(self._t).detach().cpu().numpy()  # ✅ for AsyncVectorEnv pickling
+        action_mask_3d = self._build_action_mask(self._t).detach().cpu().numpy()  # for AsyncVectorEnv pickling
         info = {"V": float(self.portfolio_value.item()), "action_mask_3d": action_mask_3d}
         return obs, info
 
