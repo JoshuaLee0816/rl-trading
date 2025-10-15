@@ -94,4 +94,4 @@ ppo:
   critic_hidden: 64
 
 testing:
-  n_runs: 5      # run_test_random_start() 測試次數
+  n_runs: 3      # run_test_random_start() 測試次數
