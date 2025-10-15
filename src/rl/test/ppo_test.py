@@ -8,17 +8,15 @@ ppo_test.py
 
 import os
 import sys
-import numpy as np
+from pathlib import Path
 
-import matplotlib
+import numpy as np
 import pandas as pd
 import torch
 import yaml
-
-matplotlib.use("Agg")  # 訓練中評測避免 block GUI
-from pathlib import Path
-
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("Agg")  # 訓練中評測避免 block GUI
 
 # region 專案路徑
 HERE = Path(__file__).resolve()
@@ -30,25 +28,20 @@ if str(SRC_DIR) not in sys.path:
 from rl.env.StockTradingEnv import StockTradingEnv
 from rl.models.ppo_agent import PPOAgent
 
-
-# === 環境快照/還原（只在測試端用，一階 lookahead） ===
 def _snapshot_env(env):
+    """取得環境狀態快照（僅測試端使用）"""
     return {
-        "_t": env._t,
-        "cash": env.cash.clone(),
-        "shares": env.shares.clone(),
-        "avg_costs": env.avg_costs.clone(),
-        "slots": list(env.slots),
-        "portfolio_value": env.portfolio_value.clone(),
-    }
+        k: getattr(env, k).clone() if hasattr(env, k) else None
+        for k in ["_t", "cash", "shares", "avg_costs", "portfolio_value"]
+    } | {"slots": list(env.slots)}
 
 def _restore_env(env, snap):
-    env._t = snap["_t"]
-    env.cash = snap["cash"]
-    env.shares = snap["shares"]
-    env.avg_costs = snap["avg_costs"]
-    env.slots = list(snap["slots"])
-    env.portfolio_value = snap["portfolio_value"]
+    """從快照還原環境狀態"""
+    for k, v in snap.items():
+        if k == "slots":
+            env.slots = list(v)
+        else:
+            setattr(env, k, v)
 
 # region run_test_once
 def run_test_once(
@@ -363,27 +356,21 @@ def run_test_random_start(
     feature_cols = full_cfg["data"]["features"]
     lookback = env_cfg["lookback"]
 
-    # === 載入完整測試資料 ===
-    if "test_file" in full_cfg["data"]:
-        data_path = Path(full_cfg["data"]["test_file"])
-    else:
-        data_path = Path(full_cfg["data"]["file"])
-
-    ROOT = Path(config_path).resolve().parent
-    data_path = ROOT / "data" / "processed" / data_path
+    # === 取得測試檔路徑 ===
+    data_cfg = full_cfg["data"]
+    root_dir = Path(config_path).resolve().parent
+    data_name = data_cfg.get("test_file") or data_cfg.get("file")
+    data_path = root_dir / "data" / "processed" / data_name
     if not data_path.exists():
         raise FileNotFoundError(f"測試資料不存在：{data_path}")
 
-    if str(data_path).endswith(".parquet"):
-        df = pd.read_parquet(data_path)
-    else:
-        df = pd.read_csv(data_path, parse_dates=["date"])
-    print(f"[INFO] 載入測試資料成功：{data_path}")
+    # === 載入資料 ===
+    df = pd.read_parquet(data_path) if data_path.suffix == ".parquet" \
+        else pd.read_csv(data_path, parse_dates=["date"])
 
-    keep_cols = ["date", "stock_id"] + feature_cols
-    df = df[keep_cols]
-    df = df.sort_values("date").reset_index(drop=True)
+    df = df[["date", "stock_id"] + feature_cols].sort_values("date").reset_index(drop=True)
     ids = sorted(df["stock_id"].unique())
+
 
     # === 日期範圍檢查 ===
     all_dates = np.sort(df["date"].unique())
