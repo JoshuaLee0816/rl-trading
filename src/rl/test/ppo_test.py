@@ -83,7 +83,7 @@ def run_test_once(
     # override initial cash if provided
     if initial_cash is not None:
         env_cfg["initial_cash"] = initial_cash
-        
+
     # === 初始化環境（CPU） ===
     env = StockTradingEnv(
         df=df,
@@ -405,10 +405,10 @@ def run_test_random_start(
         df_sub = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
 
         # 隨機初始資金
-        init_cash = float(rng.integers(100_000, 500_001))
+        init_cash = float(rng.integers(50_000, 500_001))
         local_tag = f"{tag or 'random'}_{run_id}_{str(start_date)[:10]}"
 
-        print(f"[Random Test {run_id}/{n_runs}] 區間: {start_date} ~ {end_date} | 初始資金: {init_cash:,.0f}")
+        #print(f"[Random Test {run_id}/{n_runs}] 區間: {start_date} ~ {end_date} | 初始資金: {init_cash:,.0f}")
 
         # === 暫存子資料 ===
         tmp_path = Path("src/rl/test/temp_random.parquet")
