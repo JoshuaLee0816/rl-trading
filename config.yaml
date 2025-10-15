@@ -28,7 +28,7 @@ model:
 data:
   file: "full_300/walk_forward/WF_train_2015_2019_full_300.parquet"
   # 單一測試檔仍可用（部分工具會讀這個）
-  test_file: "full_300/walk_forward/WF_test_2020_full_300.parquet"
+  test_file: "full_300/walk_forward/WF_test_2020_2024_full_300.parquet"  #  整合檔 隨機測試用
   # 新增：多年份測試檔（ppo_test 會優先找這個）
   test_files:
     "2020": "full_300/walk_forward/WF_test_2020_full_300.parquet"
@@ -57,12 +57,12 @@ logging:
   save_trades: false
   trade_sample_freq: 1
   wandb_every: 1
-  test_every: 50                # 每N個 outer-episode 跑一次 2020–2024 測試
+  test_every: 1                # 每N個 outer-episode 跑一次 2020–2024 測試
 
 ppo:
   # 執行設備與並行
   device: "mps"                  # mac 上會用 MPS；Windows/無 MPS 會自動 fallback 到 CPU
-  num_envs: 4
+  num_envs: 2
   use_subproc: false
 
   # 演算法超參數

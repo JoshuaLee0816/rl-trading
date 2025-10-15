@@ -8,6 +8,7 @@ ppo_test.py
 
 import os
 import sys
+import numpy as np
 
 import matplotlib
 import pandas as pd
@@ -320,6 +321,130 @@ def run_test_once(
     if not return_fig and save_trades:
         return total_return, max_drawdown, df_perf, df_baseline, actions
     return total_return, max_drawdown, df_perf, df_baseline
+
+
+# region run_test_random_start
+def run_test_random_start(
+    actor_path,
+    config_path,
+    plot=True,
+    save_trades=False,
+    tag=None,
+    verbose=True,
+    return_fig=False,
+    policy="argmax",
+    conf_threshold=0.75,
+    random_seed=None,
+    n_runs=5,
+):
+    """
+    從 2020~2024 整合測試檔隨機抽取多段進行完整測試：
+    - 固定長度 252 交易日（一年）
+    - 起始時間隨機（需 ≥ lookback）
+    - 初始資金隨機 (10萬~50萬)
+    - 每段呼叫 run_test_once()，畫出完整 Portfolio 曲線圖（含 baseline、買賣點）
+    - 回傳平均績效與所有圖形
+    """
+
+    import random
+
+    # === 載入 config.yaml ===
+    with open(config_path, "r", encoding="utf-8") as f:
+        full_cfg = yaml.safe_load(f)
+
+    env_cfg = full_cfg["environment"]
+    feature_cols = full_cfg["data"]["features"]
+    lookback = env_cfg["lookback"]
+
+    # === 載入完整測試資料 ===
+    if "test_file" in full_cfg["data"]:
+        data_path = Path(full_cfg["data"]["test_file"])
+    else:
+        data_path = Path(full_cfg["data"]["file"])
+
+    ROOT = Path(config_path).resolve().parent
+    data_path = ROOT / "data" / "processed" / data_path
+    if not data_path.exists():
+        raise FileNotFoundError(f"測試資料不存在：{data_path}")
+
+    if str(data_path).endswith(".parquet"):
+        df = pd.read_parquet(data_path)
+    else:
+        df = pd.read_csv(data_path, parse_dates=["date"])
+    print(f"[INFO] 載入測試資料成功：{data_path}")
+
+    keep_cols = ["date", "stock_id"] + feature_cols
+    df = df[keep_cols]
+    df = df.sort_values("date").reset_index(drop=True)
+    ids = sorted(df["stock_id"].unique())
+
+    # === 日期範圍檢查 ===
+    all_dates = np.sort(df["date"].unique())
+    total_days = len(all_dates)
+    if total_days <= lookback + 252:
+        raise ValueError("資料長度不足，無法抽出一年測試區間")
+
+    # === 結果記錄 ===
+    results = []
+    figs = []
+    all_sell_counts = []
+
+    rng = np.random.default_rng(random_seed)
+    for run_id in range(1, n_runs + 1):
+        # 隨機一年區段
+        start_idx = rng.integers(lookback, total_days - 252)
+        end_idx = start_idx + 252
+        start_date, end_date = all_dates[start_idx], all_dates[min(end_idx, total_days - 1)]
+        df_sub = df[(df["date"] >= start_date) & (df["date"] <= end_date)]
+
+        # 隨機初始資金
+        init_cash = float(rng.integers(100_000, 500_001))
+        local_tag = f"{tag or 'random'}_{run_id}_{str(start_date)[:10]}"
+
+        print(f"[Random Test {run_id}/{n_runs}] 區間: {start_date} ~ {end_date} | 初始資金: {init_cash:,.0f}")
+
+        # === 暫存子資料 ===
+        tmp_path = Path("src/rl/test/temp_random.parquet")
+        df_sub.to_parquet(tmp_path, index=False)
+
+        try:
+            total_return, max_drawdown, df_perf, df_base, fig, actions, sell_count = run_test_once(
+                actor_path=str(actor_path),
+                data_path=str(tmp_path),
+                config_path=config_path,
+                plot=True,             # ✅ 完整 Portfolio 圖
+                save_trades=save_trades,
+                tag=local_tag,
+                verbose=False,
+                return_fig=True,
+                policy=policy,
+                conf_threshold=conf_threshold,
+            )
+
+            results.append((total_return, max_drawdown))
+            figs.append(fig)
+            all_sell_counts.append(sell_count)
+
+        except Exception as e:
+            print(f"[WARN] Random Test {run_id} 失敗：{e}")
+            continue
+
+    # === 匯總結果 ===
+    mean_return = np.mean([r[0] for r in results]) if results else 0.0
+    mean_mdd = np.mean([r[1] for r in results]) if results else 0.0
+    mean_trades = np.mean(all_sell_counts) if all_sell_counts else 0.0
+
+    print(f"[INFO] Random-start test avg: return={mean_return:.4f}, mdd={mean_mdd:.4f}, trades={mean_trades:.1f}")
+
+    # === 回傳 ===
+    return {
+        "total_return": mean_return,
+        "max_drawdown": mean_mdd,
+        "sell_count": mean_trades,
+        "figs": figs,  # ✅ 多張 Portfolio 圖 (每段測試一張)
+    }
+
+
 
 
 def _resolve_test_path(root: Path, cfg: dict, year: int) -> Path:

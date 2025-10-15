@@ -211,6 +211,12 @@ def main():
     pd.DataFrame(summary_rows).to_csv(SUMMARY_FILE, index=False)
     print(f"[OK] summary saved -> {SUMMARY_FILE}")
 
+     # === [新增] 產出 2020–2024 整合測試集 ===
+    test_years = list(range(2020, 2025))
+    df_test_full = feat_long[feat_long["date"].dt.year.isin(test_years)].copy()
+    out_file = WF_DIR / f"WF_test_2020_2024_{MODE}.parquet"
+    df_test_full.to_parquet(out_file, engine="pyarrow", index=False)
+    print(f"[OK] saved combined test set -> {out_file}")
 
 if __name__ == "__main__":
     main()

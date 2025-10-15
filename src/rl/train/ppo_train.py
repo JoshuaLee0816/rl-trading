@@ -42,7 +42,7 @@ if str(SRC_DIR) not in sys.path:
 from rl.env.StockTradingEnv import StockTradingEnv
 # === 模組 ===
 from rl.models.ppo_agent import PPOAgent
-from rl.test.ppo_test import _resolve_test_path, run_test_once
+from rl.test.ppo_test import _resolve_test_path, run_test_once, run_test_random_start
 
 # RAM記憶體觀察用
 proc = psutil.Process(os.getpid())
@@ -208,13 +208,13 @@ if __name__ == "__main__":
             try:
                 agent.actor.load_state_dict(torch.load(actor_best, map_location=agent.device))
                 agent.critic.load_state_dict(torch.load(critic_best, map_location=agent.device))
-                print(f"[INFO] ✅ 從 best.pt 續訓成功 ({actor_best.name}, {critic_best.name})")
+                print(f"[INFO] 從 best.pt 續訓成功 ({actor_best.name}, {critic_best.name})")
             except Exception as e:
-                print(f"[WARN] ⚠️ 續訓模型載入失敗，改為從頭訓練：{e}")
+                print(f"[WARN] 續訓模型載入失敗，改為從頭訓練：{e}")
         else:
-            print("[WARN] ⚠️ 找不到 best.pt，改為從頭訓練")
+            print("[WARN] 找不到 best.pt，改為從頭訓練")
     else:
-        print("[INFO] 🚀 resume_from_best=False，從頭開始訓練")
+        print("[INFO] resume_from_best=False，從頭開始訓練")
 
 
     print("=== [DEBUG TRAIN LOOP INIT] ===")
@@ -343,12 +343,15 @@ if __name__ == "__main__":
                     _cfg_for_test = yaml.safe_load(_f)
 
                 results_ev = {}
+
+                # region Run_Test_One
+                """
                 for y in years:
                     data_path = _resolve_test_path(ROOT, _cfg_for_test, y)
                     if not data_path.exists():
                         print(f"[WARN] EV-greedy 測試找不到 {y} 的檔案：{data_path}")
                         continue
-
+                    
                     try:
                         tr, mdd, _df_perf, df_base, fig, _actions, sell_count = run_test_once(
                             actor_path=str(tmp_ckpt),
@@ -383,6 +386,40 @@ if __name__ == "__main__":
 
                     except Exception as e:
                         print(f"[WARN] EV-greedy 測試 {y} 失敗：{e}")
+                """
+
+                # region Random_Start_Test
+                # 單一 Random-start 測試（從 2020~2024 整合檔隨機抽 5 段)
+                try:
+                    random_result = run_test_random_start(
+                        actor_path=str(tmp_ckpt),
+                        config_path=str(ROOT / "config.yaml"),
+                        n_runs=5,                 # 抽 5 段
+                        save_trades=True,
+                        plot=True,                # ✅ 開啟繪圖
+                        tag=f"EV_ep{ep}",
+                        verbose=True
+                    )
+
+                    avg_return = random_result["total_return"]
+                    avg_mdd = random_result["max_drawdown"]
+                    avg_trade_count = random_result["sell_count"]
+                    figs = random_result["figs"]
+
+                    # 每張圖單獨加入 results_ev
+                    results_ev = {}
+                    for i, fig in enumerate(figs, 1):
+                        results_ev[f"random_{i}"] = {
+                            "total_return": avg_return,
+                            "max_drawdown": avg_mdd,
+                            "trade_count": avg_trade_count,
+                            "fig": fig,
+                        }
+
+                    print(f"[INFO] Random-start test avg: return={avg_return:.4f}, mdd={avg_mdd:.4f}, trades={avg_trade_count:.1f}")
+
+                except Exception as e:
+                    print(f"[WARN] Random-start 測試失敗：{e}")
 
                 # === 五年平均後上傳到 W&B ===
                 if upload_wandb and len(results_ev) > 0:
@@ -415,10 +452,13 @@ if __name__ == "__main__":
                     log_dict = {}
                     panel_imgs_ev = []
                     for y, r in results_ev.items():
-                        if r["fig"] is not None:
-                            img = wandb.Image(r["fig"], caption=f"EV-greedy {y}")
+                        # 檢查 fig 是否存在，防止 KeyError
+                        fig_obj = r.get("fig", None) if isinstance(r, dict) else None
+                        if fig_obj is not None:
+                            caption = f"Random-start Test ({y})" if y == "random" else f"EV-greedy {y}"
+                            img = wandb.Image(fig_obj, caption=caption)
                             panel_imgs_ev.append(img)
-                            plt.close(r["fig"])
+                            plt.close(fig_obj)
 
                     if panel_imgs_ev:
                         log_dict["test/panel"] = panel_imgs_ev
