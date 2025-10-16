@@ -141,13 +141,7 @@ if __name__ == "__main__":
             project="rl-trading",
             name=f"{model}_{run_id}",
             job_type="train",
-            config={
-                "model": model,
-                "policy": test_cfg.get("policy", "argmax"),
-                "conf_threshold": test_cfg.get("conf_threshold"),
-                "reward_mode": env_cfg.get("reward_mode"),
-                "encoder": env_cfg.get("encoder", "mlp"),
-            },
+            config = config,
             settings=wandb.Settings(_disable_stats=True)
         )
 
