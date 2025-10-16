@@ -246,6 +246,23 @@ if __name__ == "__main__":
             logs = agent.update()
 
             total_ep = ep * n_envs
+
+            # === 🟩 訓練結果上傳到 W&B ===
+            if upload_wandb and (ep % max(1, wandb_every) == 0):
+                metrics = compute_episode_metrics(daily_returns)
+                reward_mean = float(np.mean(ep_rewards)) if len(ep_rewards) > 0 else 0.0
+                ep_mdd = min([i.get("mdd", 0.0) for i in infos_list]) * 100
+                wandb.log({
+                    "train/actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
+                    "train/critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
+                    "train/entropy": agent.entropy_log[-1] if agent.entropy_log else None,
+                    "train/avg_trade_count": float(np.mean(ep_trade_counts)),
+                    "train/mdd%": ep_mdd,
+                    "train/reward_mean": reward_mean,
+                    "train/annualized_pct": float(metrics["annualized_pct"]),
+                }, step=total_ep)
+            # === 🟩 End ===
+
             if upload_wandb and (ep % max(1, test_every) == 0):
                 tmp_ckpt = run_dir / f"eval_tmp_ep{ep}.pt"
                 torch.save({"actor": agent.actor.state_dict(), "critic": agent.critic.state_dict()}, tmp_ckpt)
