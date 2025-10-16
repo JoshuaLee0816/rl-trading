@@ -359,11 +359,11 @@ if __name__ == "__main__":
                 results_ev = {}
 
                 # region Run_Test_One
-                """
+                
                 for y in years:
                     data_path = _resolve_test_path(ROOT, _cfg_for_test, y)
                     if not data_path.exists():
-                        print(f"[WARN] EV-greedy 測試找不到 {y} 的檔案：{data_path}")
+                        print(f"[WARN] Argmax 測試找不到 {y} 的檔案：{data_path}")
                         continue
                     
                     try:
@@ -373,10 +373,12 @@ if __name__ == "__main__":
                             config_path=str(ROOT / "config.yaml"),
                             plot=True,
                             save_trades=True,
-                            tag=f"{y}_EV_ep{ep}",
+                            tag=f"{y}_Argmax_ep{ep}",
                             verbose=True,
                             return_fig=True,
-                            policy="sample"
+                            policy=test_policy,
+                            conf_threshold=test_conf_threshold,
+                            initial_cash=100000, #固定初始資金
                         )
 
                         trade_count = len(_actions) if _actions is not None else 0
@@ -399,8 +401,8 @@ if __name__ == "__main__":
                         #print(f"{y}: sell_count = {sell_count}")
 
                     except Exception as e:
-                        print(f"[WARN] EV-greedy 測試 {y} 失敗：{e}")
-                """
+                        print(f"[WARN] Argmax 測試 {y} 失敗：{e}")
+                
 
                 # region Random_Start_Test
                 # 單一 Random-start 測試（從 2020~2024 整合檔隨機抽 5 段)
@@ -418,7 +420,7 @@ if __name__ == "__main__":
                         n_runs=test_n_runs,
                         save_trades=True,
                         plot=True,
-                        tag=f"EV_ep{ep}",
+                        tag=f"Argmax_ep{ep}",
                         verbose=True,
                         policy=test_policy,                 
                         conf_threshold=test_conf_threshold  
@@ -467,10 +469,10 @@ if __name__ == "__main__":
                         best_avg_return = avg_return
                         torch.save(agent.actor.state_dict(), ckpt_dir / "actor_best.pt")
                         torch.save(agent.critic.state_dict(), ckpt_dir / "critic_best.pt")
-                        print(f"[INFO] 🏆 更新最佳模型 mean_return={avg_return:.4f}")
+                        print(f"[INFO] 更新最佳模型 mean_return={avg_return:.4f}")
 
                 if len(results_ev) == 0:
-                    print("[WARN] EV-greedy 測試無成功年份，略過上傳。")
+                    print("[WARN] Argmax 測試無成功年份，略過上傳。")
                 else:
                     log_dict = {}
                     panel_imgs_ev = []
