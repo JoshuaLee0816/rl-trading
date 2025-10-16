@@ -187,7 +187,7 @@ def get_reward_fn(mode: str):
     elif mode == "strong_signal_return":
         return strong_signal_return
 
-    elif mode == "aggresive_signal_return":
+    elif mode == "aggressive_signal_return":
         return aggressive_signal_return
     
     else:
