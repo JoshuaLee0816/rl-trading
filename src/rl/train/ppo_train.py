@@ -49,9 +49,6 @@ proc = psutil.Process(os.getpid())
 
 # region --------- 小工具 ----------
 def split_infos(infos):
-    """
-    將 AsyncVectorEnv 的 infos(dict of arrays) 攤平成 list[dict]
-    """
     if isinstance(infos, dict) and len(infos) > 0 and isinstance(next(iter(infos.values())), (np.ndarray, list, tuple)):
         n = len(next(iter(infos.values())))
         out = []
@@ -90,17 +87,12 @@ def compute_episode_metrics(daily_returns: list[torch.Tensor]) -> dict:
     total_return = (torch.exp(R_total) - 1.0).item()
     days = daily_returns.numel()
     annualized_return = ((1.0 + total_return) ** (252.0 / days) - 1.0)
-
-    # 估算這段相當於幾年期（方便 debug）
     segment_years = days / 252.0
-
     return {"R_total": R_total, "total_return": total_return, "days": days, "segment_years": segment_years, "annualized_pct": annualized_return * 100.0}
-
 # endregion 小工具
 
 # region 主程式
 if __name__ == "__main__":
-    # 讀設定
     with open(ROOT / "config.yaml", "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
@@ -129,27 +121,21 @@ if __name__ == "__main__":
 
     # region W&B 初始化
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-
     if upload_wandb:
-        # === 從 config.yaml 收集實驗資訊 ===
         test_cfg = config.get("testing", {})
         env_cfg  = config.get("environment", {})
         model = train_cfg.get("model")
 
-        # === 建立 W&B 初始化設定 ===
         wandb.init(
             project="rl-trading",
             name=f"{model}_{run_id}",
             job_type="train",
-            config = config,
+            config=config,
             settings=wandb.Settings(_disable_stats=True)
         )
 
         print(f"Policy = {test_cfg.get('policy', 'argmax')} | Reward = {env_cfg.get('reward_mode', 'daily_return')} | Encoder = {env_cfg.get('encoder', 'mlp')}")
-        
-        # === 建立固定長度的存放圖表區 ===
         recent_test_logs = deque(maxlen=max_ckpts)
-
 
     outdir = ROOT / log_cfg.get("outdir", "logs/runs")
     run_dir = outdir / f"run_{run_id}"
@@ -171,26 +157,24 @@ if __name__ == "__main__":
     ids = sorted(df["stock_id"].unique())
     num_stocks = len(ids)
 
-    # 建立 Vector 環境（每個子程序環境僅用 CPU 記憶體）
     def make_env():
         def _init():
             return StockTradingEnv(
-                df = df,
-                stock_ids = ids,
-                lookback = lookback,
-                initial_cash = init_cash,
-                reward_mode = reward_mode,
-                action_mode = action_mode,
-                max_holdings = max_holdings,
-                qmax_per_trade = qmax_per_trade,
-                device="cpu", 
+                df=df,
+                stock_ids=ids,
+                lookback=lookback,
+                initial_cash=init_cash,
+                reward_mode=reward_mode,
+                action_mode=action_mode,
+                max_holdings=max_holdings,
+                qmax_per_trade=qmax_per_trade,
+                device="cpu",
             )
         return _init
 
     envs = AsyncVectorEnv([make_env() for _ in range(num_envs)])
     n_envs = num_envs
 
-    # 建立一次性 env 取 obs_dim
     tmp_env = StockTradingEnv(
         df=df,
         stock_ids=ids,
@@ -203,18 +187,10 @@ if __name__ == "__main__":
         device="cpu",
     )
     obs_dim = tmp_env.obs_dim
-    action_dim = tmp_env.action_dim
     del tmp_env
 
-    # Agent（自動選擇 MPS / CUDA / CPU）
-    agent = PPOAgent(
-        obs_dim=obs_dim,
-        num_stocks=num_stocks,
-        qmax_per_trade=qmax_per_trade,
-        config=config,
-    )
+    agent = PPOAgent(obs_dim=obs_dim, num_stocks=num_stocks, qmax_per_trade=qmax_per_trade, config=config)
 
-    # === 修改：依照 config 決定是否載入 best.pt ===
     ckpt_dir = ROOT / "logs/runs"
     actor_best = ckpt_dir / "actor_best.pt"
     critic_best = ckpt_dir / "critic_best.pt"
@@ -232,34 +208,21 @@ if __name__ == "__main__":
     else:
         print("[INFO] resume_from_best=False，從頭開始訓練")
 
-
-    print("=== [DEBUG TRAIN LOOP INIT] ===")
-    print(f"n_envs={n_envs}, n_steps={agent.n_steps}, batch_size={agent.batch_size}, epochs={agent.epochs}")
-    print(f"Stocks={num_stocks}, Lookback={lookback}, Features={len(selected_feats) if selected_feats else 0}")
-    print(f"Max_holdings={max_holdings}, QMAX={qmax_per_trade}")
-
-    # 進度條：總回合 = 外層集數 * 環境數
-    # progress_bar = trange(1, n_episodes * n_envs + 1, unit="episode", unit_scale=n_envs)
     progress_bar = trange(1, n_episodes + 1, unit="EP")
 
     try:
         for ep in progress_bar:
-            # reset
             obs_nd, infos = envs.reset()
             obs = agent.obs_to_tensor(obs_nd)
             infos_list = split_infos(infos)
-
             prev_V = torch.tensor([i["V"] for i in infos_list], dtype=torch.float32)
             daily_returns = []
             ep_trade_counts = [0 for _ in range(n_envs)]
             ep_rewards = []
 
-            start = time.perf_counter()
             for t in range(agent.n_steps):
                 mask_batch = [i.get("action_mask_3d", None) for i in infos_list]
-                actions_tuple, actions_flat, logps, values, obs_batch, mask_batch_t = agent.select_action(
-                    obs, mask_batch
-                )
+                actions_tuple, actions_flat, logps, values, obs_batch, mask_batch_t = agent.select_action(obs, mask_batch)
                 actions_np = np.asarray(actions_tuple, dtype=np.int64)
                 obs_nd, rewards, dones, truncs, infos = envs.step(actions_np)
                 ep_rewards.extend(rewards.tolist())
@@ -275,97 +238,34 @@ if __name__ == "__main__":
                 mask_alive = ~(torch.as_tensor(dones, dtype=torch.bool) | torch.as_tensor(truncs, dtype=torch.bool))
                 if mask_alive.any():
                     daily_returns.append(log_ret[mask_alive].detach().cpu())
-
-                #daily_returns.append(log_ret.detach().cpu())
                 prev_V = cur_V
 
                 for i in range(n_envs):
-                    agent.store_transition(
-                        obs_batch[i],
-                        actions_flat[i],
-                        rewards[i],
-                        dones[i],
-                        logps[i],
-                        values[i],
-                        mask_batch_t[i],
-                    )
+                    agent.store_transition(obs_batch[i], actions_flat[i], rewards[i], dones[i], logps[i], values[i], mask_batch_t[i])
 
-            end = time.perf_counter()
-            #print(f"[DEBUG] Rollout (env interaction) 花費 {end - start:.3f} 秒")
-
-            #agent.update()
             logs = agent.update()
 
-            # === Reward 統計 ===
-            if len(ep_rewards) > 0:
-                reward_sum = float(np.sum(ep_rewards))
-                reward_mean = float(np.mean(ep_rewards))
-            else:
-                reward_sum, reward_mean = 0.0, 0.0
-
-
-            metrics = compute_episode_metrics(daily_returns)
-            days = metrics["days"]
-
-            # === [新增] 檢查 total_return 合理性 ===
-            total_return_pct = metrics["total_return"] * 100
-            annualized_pct = metrics["annualized_pct"]
-            segment_years = metrics["segment_years"]
-            #print(f"[CHECK] Ep{ep}: annualized% = {annualized_pct:.2f}% | total={total_return_pct:.2f}% | days={days} (~{segment_years:.2f}y)")
-
-            # 計算平均年化交易次數 (次／年) ===
-            final_trade_counts = [i.get("trade_count", 0) for i in infos_list]
-            avg_trades_per_episode = float(np.mean(final_trade_counts))
-
-            # 換算成年化次數（假設一年 252 交易日）
-            avg_trades = (avg_trades_per_episode / max(1, days)) * 252.0
-
-            # check MDD 有沒有學會
-            mdd_list = [i.get("mdd", 0.0) for i in infos_list]
-            ep_mdd = min(mdd_list) * 100  # ← episode 最大回撤 (%)
-
             total_ep = ep * n_envs
-            if total_ep % ckpt_freq == 0:
-                ckpt_path = save_checkpoint(run_dir, agent, ep)
-                prune_checkpoints(run_dir, max_ckpts)
-
-            if upload_wandb and (ep % max(1, wandb_every) == 0):
-                wandb.log({
-                    "train/actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
-                    "train/critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
-                    "train/entropy": agent.entropy_log[-1] if agent.entropy_log else None,
-                    "train/avg_trade_count": avg_trades,
-                    "train/mdd%": ep_mdd,
-                    "train/policy_kl": logs.get("policy_kl"),
-                    "train/clip_eps_now": logs.get("clip_eps_now"),
-                    "train/kl_early_stop": logs.get("kl_early_stop"),
-                    "train/entropy_coef_now": logs.get("entropy_coef_now"),
-     
-                    #"eval/total_return%": float(metrics["total_return"] * 100.0), #這個是指整個episodes訓練完成後的總報酬
-                    "eval/annualized_pct": float(metrics["annualized_pct"]),
-                    "eval/reward_mean": reward_mean,
-                }, step=total_ep)
-
-            # === 每 test_every 個 outer-episode 跑一次 5 年測試並上傳到 W&B ===
             if upload_wandb and (ep % max(1, test_every) == 0):
                 tmp_ckpt = run_dir / f"eval_tmp_ep{ep}.pt"
-                torch.save({"actor": agent.actor.state_dict(),
-                            "critic": agent.critic.state_dict()}, tmp_ckpt)
-
-                years = (2020, 2021, 2022, 2023, 2024)
+                torch.save({"actor": agent.actor.state_dict(), "critic": agent.critic.state_dict()}, tmp_ckpt)
                 with open(ROOT / "config.yaml", "r", encoding="utf-8") as _f:
                     _cfg_for_test = yaml.safe_load(_f)
 
-                results_ev = {}
+                years = (2020, 2021, 2022, 2023, 2024)
+                test_cfg = _cfg_for_test.get("testing", {})
+                test_policy = test_cfg.get("policy", "argmax")
+                test_conf_threshold = float(test_cfg.get("conf_threshold", 0.75))
+                test_n_runs = int(test_cfg.get("n_runs", 5))
 
-                # region Run_Test_One
-                
+                # === 🔧 修改區域開始 ===
+                # 固定五年測試 (固定初始資金 100000)
+                fixed_results = {}
                 for y in years:
                     data_path = _resolve_test_path(ROOT, _cfg_for_test, y)
                     if not data_path.exists():
-                        print(f"[WARN] Argmax 測試找不到 {y} 的檔案：{data_path}")
+                        print(f"[WARN] 找不到 {y} 的測試檔案：{data_path}")
                         continue
-                    
                     try:
                         tr, mdd, _df_perf, df_base, fig, _actions, sell_count = run_test_once(
                             actor_path=str(tmp_ckpt),
@@ -373,131 +273,75 @@ if __name__ == "__main__":
                             config_path=str(ROOT / "config.yaml"),
                             plot=True,
                             save_trades=True,
-                            tag=f"{y}_Argmax_ep{ep}",
+                            tag=f"{y}_Fixed_ep{ep}",
                             verbose=True,
                             return_fig=True,
                             policy=test_policy,
                             conf_threshold=test_conf_threshold,
-                            initial_cash=100000, #固定初始資金
+                            initial_cash=100000,
                         )
-
-                        trade_count = len(_actions) if _actions is not None else 0
-                        results_ev[y] = {
-                            "total_return": tr,
-                            "max_drawdown": mdd,
-                            "trade_count": sell_count,
-                            "fig": fig,
-                        }
-
-                        # === 在圖上右下角標註交易數與報酬率 ===
-                        ax = fig.axes[0]
-                        text_str = f"Trades: {sell_count}\nReturn: {tr*100:+.2f}%"
-                        ax.text(0.98, 0.02, text_str,
-                                transform=ax.transAxes,
-                                fontsize=11, color="black",
-                                ha="right", va="bottom",
-                                bbox=dict(boxstyle="round,pad=0.4",
-                                        facecolor="white", alpha=0.6))
-                        #print(f"{y}: sell_count = {sell_count}")
-
+                        fixed_results[y] = {"total_return": tr, "max_drawdown": mdd, "trade_count": sell_count, "fig": fig}
                     except Exception as e:
-                        print(f"[WARN] Argmax 測試 {y} 失敗：{e}")
-                
+                        print(f"[WARN] 固定年度測試 {y} 失敗：{e}")
 
-                # region Random_Start_Test
-                # 單一 Random-start 測試（從 2020~2024 整合檔隨機抽 5 段)
+                # 隨機五段測試
                 try:
-                    # 從 config 讀取測試策略設定
-                    test_cfg = _cfg_for_test.get("testing", {})
-                    test_policy = test_cfg.get("policy", "argmax")
-                    test_conf_threshold = float(test_cfg.get("conf_threshold", 0.75))
-                    test_n_runs = int(test_cfg.get("n_runs", 5))
-
-                    # 使用設定控制測試策略
                     random_result = run_test_random_start(
                         actor_path=str(tmp_ckpt),
                         config_path=str(ROOT / "config.yaml"),
                         n_runs=test_n_runs,
                         save_trades=True,
                         plot=True,
-                        tag=f"Argmax_ep{ep}",
+                        tag=f"Random_ep{ep}",
                         verbose=True,
-                        policy=test_policy,                 
-                        conf_threshold=test_conf_threshold  
+                        policy=test_policy,
+                        conf_threshold=test_conf_threshold,
                     )
-
                     avg_return = random_result["total_return"]
                     avg_mdd = random_result["max_drawdown"]
                     avg_trade_count = random_result["sell_count"]
                     figs = random_result["figs"]
-
-                    # 每張圖單獨加入 results_ev
-                    results_ev = {}
+                    random_results = {}
                     for i, fig in enumerate(figs, 1):
-                        results_ev[f"random_{i}"] = {
-                            "total_return": avg_return,
-                            "max_drawdown": avg_mdd,
-                            "trade_count": avg_trade_count,
-                            "fig": fig,
-                        }
-
-                    #print(f"[INFO] Random-start test avg: return={avg_return:.4f}, mdd={avg_mdd:.4f}, trades={avg_trade_count:.1f}")
-
+                        random_results[f"random_{i}"] = {"total_return": avg_return, "max_drawdown": avg_mdd, "trade_count": avg_trade_count, "fig": fig}
                 except Exception as e:
                     print(f"[WARN] Random-start 測試失敗：{e}")
 
-                # === 五年平均後上傳到 W&B ===
-                if upload_wandb and len(results_ev) > 0:
-                    avg_return = np.mean([v["total_return"] for v in results_ev.values()])
-                    avg_mdd = np.mean([v["max_drawdown"] for v in results_ev.values()])
-                    avg_trade_count = np.mean([v["trade_count"] for v in results_ev.values()])
-
+                # === 上傳固定五年測試結果 ===
+                if upload_wandb and len(fixed_results) > 0:
+                    avg_return_fixed = np.mean([v["total_return"] for v in fixed_results.values()])
+                    avg_mdd_fixed = np.mean([v["max_drawdown"] for v in fixed_results.values()])
+                    avg_trades_fixed = np.mean([v["trade_count"] for v in fixed_results.values()])
                     wandb.log({
-                        "test/mean_return": avg_return,
-                        "test/mean_max_drawdown": avg_mdd,
-                        "test/mean_trade_count": avg_trade_count,
+                        "test_fixed/mean_return": avg_return_fixed,
+                        "test_fixed/mean_max_drawdown": avg_mdd_fixed,
+                        "test_fixed/mean_trade_count": avg_trades_fixed,
                     }, step=total_ep)
+                    imgs_fixed = [wandb.Image(v["fig"], caption=f"Fixed Test {y}") for y, v in fixed_results.items() if v.get("fig")]
+                    if imgs_fixed:
+                        wandb.log({"test_fixed/panel": imgs_fixed}, step=total_ep)
 
-                    print(f"[INFO] 5Y avg: return={avg_return:.4f}, "
-                        f"mdd={avg_mdd:.4f}, trades={avg_trade_count:.1f}")
+                # === 上傳隨機五段測試結果 ===
+                if upload_wandb and len(random_results) > 0:
+                    avg_return_rand = np.mean([v["total_return"] for v in random_results.values()])
+                    avg_mdd_rand = np.mean([v["max_drawdown"] for v in random_results.values()])
+                    avg_trades_rand = np.mean([v["trade_count"] for v in random_results.values()])
+                    wandb.log({
+                        "test_random/mean_return": avg_return_rand,
+                        "test_random/mean_max_drawdown": avg_mdd_rand,
+                        "test_random/mean_trade_count": avg_trades_rand,
+                    }, step=total_ep)
+                    imgs_rand = [wandb.Image(v["fig"], caption=f"Random Test {k}") for k, v in random_results.items() if v.get("fig")]
+                    if imgs_rand:
+                        wandb.log({"test_random/panel": imgs_rand}, step=total_ep)
+                # === 🔧 修改區域結束 ===
 
-                    # === 更新最佳模型 ===
-                    global best_avg_return
-                    if "best_avg_return" not in globals():
-                        best_avg_return = -9999.0
-                    if avg_return > best_avg_return:
-                        best_avg_return = avg_return
-                        torch.save(agent.actor.state_dict(), ckpt_dir / "actor_best.pt")
-                        torch.save(agent.critic.state_dict(), ckpt_dir / "critic_best.pt")
-                        print(f"[INFO] 更新最佳模型 mean_return={avg_return:.4f}")
-
-                if len(results_ev) == 0:
-                    print("[WARN] Argmax 測試無成功年份，略過上傳。")
-                else:
-                    log_dict = {}
-                    panel_imgs_ev = []
-                    for y, r in results_ev.items():
-                        # 檢查 fig 是否存在，防止 KeyError
-                        fig_obj = r.get("fig", None) if isinstance(r, dict) else None
-                        if fig_obj is not None:
-                            caption = f"Random-start Test ({y})" if y == "random" else f"EV-greedy {y}"
-                            img = wandb.Image(fig_obj, caption=caption)
-                            panel_imgs_ev.append(img)
-                            plt.close(fig_obj)
-
-                    if panel_imgs_ev:
-                        log_dict["test/panel"] = panel_imgs_ev
-                        wandb.log(log_dict, step=total_ep)
-                
-                # === 清理臨時 ckpt ===
                 try:
                     tmp_ckpt.unlink(missing_ok=True)
                 except Exception:
                     pass
 
-
-            # RAM記憶體檢查用
-            rss = proc.memory_info().rss / 1024**3  # 常駐記憶體 (GB)
+            rss = proc.memory_info().rss / 1024**3
             print(f"[MEM] ep={ep} | RSS={rss:.2f} GB ")
 
     finally:
