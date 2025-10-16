@@ -123,12 +123,72 @@ def strong_signal_return(env, action, side, p_close, t):
     }
 # endregion 強化訓練績效 Reward
 
+# region Aggressive_signal_return_v2
+def aggressive_signal_return(env, action, side, p_close, t):
+    """
+    Reward = 積極獲利導向版
+    核心目標：
+      - 放大正報酬區間的獎勵
+      - 降低過度懲罰帶來的保守行為
+      - 維持穩定梯度與風控約束
+    """
+
+    V_prev = env.portfolio_value
+    V_new = env._mark_to_market(p_close)
+    env.portfolio_value = V_new
+    env.peak_value = torch.max(env.peak_value, V_new)
+
+    # === Return ===
+    portfolio_return = torch.log(torch.clamp(V_new / V_prev, min=1e-12))
+    baseline_return = torch.log(env.baseline_close[t + 1] / env.baseline_close[t])
+
+    # === 改 1: 強化 outperform，正報酬平方放大 ===
+    raw = portfolio_return - 0.3 * baseline_return
+    reward = torch.where(raw > 0, 1.5 * raw * (1 + 3 * raw), raw)   # 非線性放大  # CHANGED
+
+    # === 改 2: 降低固定交易成本 ===
+    if side in ("BUY", "SELL_ALL"):
+        reward -= 0.01  # 原本 0.02 太抑制動作  # CHANGED
+
+    # === 改 3: 漸進式浮虧懲罰 ===
+    penalty = torch.tensor(0.0, device=env.device)
+    for i in env.slots:
+        if i is not None and env.avg_costs[i] > 0:
+            cur_price = env.prices_close[env._t, i]
+            floating_ret = (cur_price - env.avg_costs[i]) / env.avg_costs[i]
+            if floating_ret < 0:
+                penalty += (-floating_ret) * 0.015   # 比原本弱一點  # CHANGED
+    reward -= penalty
+
+    # === 改 4: Drawdown penalty 保留但更平滑 ===
+    dd_from_peak = (V_new - env.peak_value) / env.peak_value
+    if dd_from_peak < -0.2:
+        reward += dd_from_peak * 0.08   # 緩懲罰，保留防爆功能  # CHANGED
+
+    # === 改 5: 加入 idle_penalty 抑制過久 HOLD ===
+    if action == 0:  # HOLD
+        reward -= 0.001  # 緩懲罰促使主動行動  # ADDED
+
+    # === Clamp 防梯度爆炸 ===
+    reward = torch.clamp(reward, -1.0, 1.0)
+
+    return reward, {
+        "baseline_return": float(baseline_return.item()),
+        "mdd": float(dd_from_peak.item()),
+        "penalty": float(penalty.item())
+    }
+# endregion
+
+
 def get_reward_fn(mode: str):
     if mode == "daily_return":
         return daily_return
     
     elif mode == "strong_signal_return":
         return strong_signal_return
+
+    elif mode == "aggresive_signal_return":
+        return aggressive_signal_return
     
     else:
         raise ValueError(f"Unknown reward mode: {mode}")

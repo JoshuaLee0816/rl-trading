@@ -7,7 +7,7 @@ training:
   max_ckpts: 10               # 最多保留的 checkpoint 數
   resume_from_best: false     # 若為 true，自動載入 logs/runs/actor_best.pt
   safety_pause: true
-  safety_interval: 1000
+  safety_interval: 500
   safety_duration: 180
 
 model:
@@ -37,11 +37,11 @@ data:
   #            'macd','macd_signal','macd_hist']
 
 environment:
-  initial_cash: 100000
+  initial_cash: 200000
   lookback: 30
   reward_mode: "strong_signal_return"   # "daily_return" | "total_profit" | "strong_signal_return"
   action_mode: "discrete"
-  max_holdings: 1
+  max_holdings: 3
   qmax_per_trade: 10
 
 
@@ -52,7 +52,7 @@ logging:
   trade_sample_freq: 1
   wandb_every: 1
   test_every: 25              # 每 N 個 outer-episode 跑一次 2020–2024 測試
-  test_start_ep: 200          # 從第幾集開始進行測試
+  test_start_ep: 400          # 從第幾集開始進行測試
   test_every_later: 10        # 後期的密集測試
 
 
@@ -66,7 +66,7 @@ ppo:
   gamma: 0.995
   gae_lambda: 0.95
   clip_epsilon: 0.1
-  entropy_coef: 0.01
+  entropy_coef: 0.015
   value_coef: 0.5
 
   # === 最佳化與批次設定 ===
@@ -77,7 +77,7 @@ ppo:
   epochs: 3
 
   # === KL-aware PPO ===
-  target_kl: 0.025           # 常見 0.01~0.05；交易/多動作可設 0.02~0.03
+  target_kl: 0.02            # 常見 0.01~0.05；交易/多動作可設 0.02~0.03
   kl_stop_mult: 1.8          # KL > N×target_kl → 早停當輪 epoch
   kl_low_mult: 0.8           # KL < N×target_kl → 當作更新太小
   adapt_clip: true           # 啟用浮動 clip（想單做早停就 false）
