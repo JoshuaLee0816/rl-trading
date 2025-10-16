@@ -336,7 +336,7 @@ if __name__ == "__main__":
                     }, step=total_ep)
                     imgs_fixed = [wandb.Image(v["fig"], caption=f"Fixed Test {y}") for y, v in fixed_results.items() if v.get("fig")]
                     if imgs_fixed:
-                        wandb.log({"test_fixed/panel": imgs_fixed}, step=total_ep)
+                        wandb.log({"2_test_fixed/panel": imgs_fixed}, step=total_ep)
 
                 # 上傳隨機測試
                 if upload_wandb and len(random_results) > 0:
@@ -347,7 +347,7 @@ if __name__ == "__main__":
                     }, step=total_ep)
                     imgs_rand = [wandb.Image(v["fig"], caption=f"Random Test {k}") for k, v in random_results.items() if v.get("fig")]
                     if imgs_rand:
-                        wandb.log({"test_random/panel": imgs_rand}, step=total_ep)
+                        wandb.log({"3_test_random/panel": imgs_rand}, step=total_ep)
 
                 try:
                     tmp_ckpt.unlink(missing_ok=True)
