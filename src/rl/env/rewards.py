@@ -123,70 +123,6 @@ def strong_signal_return(env, action, side, p_close, t):
     }
 # endregion 強化訓練績效 Reward
 
-# region Aggressive_signal_return_v2 (vector-safe)
-def aggressive_signal_return(env, action, side, p_close, t):
-    """
-    Reward = 積極獲利導向版 (支援多環境)
-    修正版：移除所有會造成 ambiguous truth value 的 if
-    """
-
-    V_prev = env.portfolio_value
-    V_new = env._mark_to_market(p_close)
-    env.portfolio_value = V_new
-    env.peak_value = torch.max(env.peak_value, V_new)
-
-    # === Return ===
-    portfolio_return = torch.log(torch.clamp(V_new / V_prev, min=1e-12))
-    baseline_return = torch.log(env.baseline_close[t + 1] / env.baseline_close[t])
-
-    # === 改 1: 強化 outperform，正報酬平方放大 ===
-    raw = portfolio_return - 0.3 * baseline_return
-    reward = torch.where(raw > 0, 1.5 * raw * (1 + 3 * raw), raw)   # ✅ 向量化
-
-    # === 改 2: 降低固定交易成本 ===
-    if isinstance(side, (list, tuple)):
-        # 多環境：批次處理
-        side_tensor = torch.tensor([1.0 if s in ("BUY", "SELL_ALL") else 0.0 for s in side], device=env.device)
-        reward -= 0.01 * side_tensor
-    else:
-        # 單環境
-        if side in ("BUY", "SELL_ALL"):
-            reward -= 0.01
-
-    # === 改 3: 漸進式浮虧懲罰 (向量化)
-    penalty = torch.zeros_like(reward)
-    for i in env.slots:
-        if i is not None and env.avg_costs[i] > 0:
-            cur_price = env.prices_close[env._t, i]
-            floating_ret = (cur_price - env.avg_costs[i]) / env.avg_costs[i]
-            penalty += torch.where(floating_ret < 0, -floating_ret * 0.015, torch.zeros_like(floating_ret))
-    reward -= penalty
-
-    # === 改 4: Drawdown penalty (向量化)
-    dd_from_peak = (V_new - env.peak_value) / env.peak_value
-    drawdown_penalty = torch.where(dd_from_peak < -0.2, dd_from_peak * 0.08, torch.zeros_like(dd_from_peak))
-    reward += drawdown_penalty
-
-    # === 改 5: Idle penalty (向量化)
-    if isinstance(action, torch.Tensor):
-        hold_mask = (action == 0).float()
-        reward -= 0.001 * hold_mask
-    else:
-        if action == 0:
-            reward -= 0.001
-
-    # === Clamp 防梯度爆炸 ===
-    reward = torch.clamp(reward, -1.0, 1.0)
-
-    return reward, {
-        "baseline_return": float(torch.mean(baseline_return).item()),
-        "mdd": float(torch.mean(dd_from_peak).item()),
-        "penalty": float(torch.mean(penalty).item())
-    }
-# endregion
-
-
-
 def get_reward_fn(mode: str):
     if mode == "daily_return":
         return daily_return
@@ -194,9 +130,10 @@ def get_reward_fn(mode: str):
     elif mode == "strong_signal_return":
         return strong_signal_return
 
-    elif mode == "aggressive_signal_return":
-        return aggressive_signal_return
-    
+
+    #elif mode == "aggressive_signal_return":
+        #return aggressive_signal_return
+
     else:
         raise ValueError(f"Unknown reward mode: {mode}")
 
