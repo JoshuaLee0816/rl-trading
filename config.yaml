@@ -6,6 +6,9 @@ training:
   ckpt_freq: 20               # 每多少 episodes 存一次 checkpoint
   max_ckpts: 10               # 最多保留的 checkpoint 數
   resume_from_best: false     # 若為 true，自動載入 logs/runs/actor_best.pt
+  safety_pause: true
+  safety_interval: 1000
+  safety_duration: 180
 
 model:
   encoder:

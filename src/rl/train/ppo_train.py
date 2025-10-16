@@ -210,6 +210,15 @@ if __name__ == "__main__":
 
     try:
         for ep in progress_bar:
+            #先處理safety pause
+            if train_cfg.get("safety_pause", False) and ep % int(train_cfg.get("safety_interval")) == 0 and ep > 0:
+                duration = int(train_cfg.get("safety_duration"))
+                print(f"\n[SAFETY] Safety pause triggered at episode {ep}. Sleeping for {duration} seconds...\n")
+                for i in range(duration, 0, -60):  # 每分鐘倒數一次
+                    print(f"Resume in {i//60} minutes...", end="\r")
+                    time.sleep(60)
+                print(f"\n[SAFETY] Resume training after {duration} seconds.\n")
+
             obs_nd, infos = envs.reset()
             obs = agent.obs_to_tensor(obs_nd)
             infos_list = split_infos(infos)
