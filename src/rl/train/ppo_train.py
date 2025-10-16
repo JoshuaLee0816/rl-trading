@@ -29,10 +29,8 @@ try:
 except RuntimeError:
     pass
 
-# 降低每個子程序的CPU thread 競爭
 torch.set_num_threads(1)
 
-# === 專案路徑 ===
 HERE = Path(__file__).resolve()
 SRC_DIR = HERE.parents[2]
 ROOT = HERE.parents[3]
@@ -40,11 +38,9 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from rl.env.StockTradingEnv import StockTradingEnv
-# === 模組 ===
 from rl.models.ppo_agent import PPOAgent
 from rl.test.ppo_test import _resolve_test_path, run_test_once, run_test_random_start
 
-# RAM記憶體觀察用
 proc = psutil.Process(os.getpid())
 
 # region --------- 小工具 ----------
@@ -244,25 +240,30 @@ if __name__ == "__main__":
                     agent.store_transition(obs_batch[i], actions_flat[i], rewards[i], dones[i], logps[i], values[i], mask_batch_t[i])
 
             logs = agent.update()
+            metrics = compute_episode_metrics(daily_returns)
 
+            reward_mean = float(np.mean(ep_rewards)) if len(ep_rewards) > 0 else 0.0
+            ep_mdd = min([i.get("mdd", 0.0) for i in infos_list]) * 100
+            avg_trades = float(np.mean(ep_trade_counts))
             total_ep = ep * n_envs
 
-            # === 🟩 訓練結果上傳到 W&B ===
+            # === Training metrics ===
             if upload_wandb and (ep % max(1, wandb_every) == 0):
-                metrics = compute_episode_metrics(daily_returns)
-                reward_mean = float(np.mean(ep_rewards)) if len(ep_rewards) > 0 else 0.0
-                ep_mdd = min([i.get("mdd", 0.0) for i in infos_list]) * 100
                 wandb.log({
                     "train/actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
                     "train/critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
                     "train/entropy": agent.entropy_log[-1] if agent.entropy_log else None,
-                    "train/avg_trade_count": float(np.mean(ep_trade_counts)),
+                    "train/avg_trade_count": avg_trades,
                     "train/mdd%": ep_mdd,
-                    "train/reward_mean": reward_mean,
-                    "train/annualized_pct": float(metrics["annualized_pct"]),
+                    "train/policy_kl": logs.get("policy_kl"),
+                    "train/clip_eps_now": logs.get("clip_eps_now"),
+                    "train/kl_early_stop": logs.get("kl_early_stop"),
+                    "train/entropy_coef_now": logs.get("entropy_coef_now"),
+                    "eval/reward_mean": reward_mean,
+                    "eval/annualized_pct": float(metrics["annualized_pct"]),
                 }, step=total_ep)
-            # === 🟩 End ===
 
+            # === Test section ===
             if upload_wandb and (ep % max(1, test_every) == 0):
                 tmp_ckpt = run_dir / f"eval_tmp_ep{ep}.pt"
                 torch.save({"actor": agent.actor.state_dict(), "critic": agent.critic.state_dict()}, tmp_ckpt)
@@ -275,8 +276,7 @@ if __name__ == "__main__":
                 test_conf_threshold = float(test_cfg.get("conf_threshold", 0.75))
                 test_n_runs = int(test_cfg.get("n_runs", 5))
 
-                # === 🔧 修改區域開始 ===
-                # 固定五年測試 (固定初始資金 100000)
+                # 固定五年測試
                 fixed_results = {}
                 for y in years:
                     data_path = _resolve_test_path(ROOT, _cfg_for_test, y)
@@ -284,7 +284,7 @@ if __name__ == "__main__":
                         print(f"[WARN] 找不到 {y} 的測試檔案：{data_path}")
                         continue
                     try:
-                        tr, mdd, _df_perf, df_base, fig, _actions, sell_count = run_test_once(
+                        tr, mdd, _, _, fig, _, sell_count = run_test_once(
                             actor_path=str(tmp_ckpt),
                             data_path=str(data_path),
                             config_path=str(ROOT / "config.yaml"),
@@ -301,7 +301,8 @@ if __name__ == "__main__":
                     except Exception as e:
                         print(f"[WARN] 固定年度測試 {y} 失敗：{e}")
 
-                # 隨機五段測試
+                # 隨機測試
+                random_results = {}
                 try:
                     random_result = run_test_random_start(
                         actor_path=str(tmp_ckpt),
@@ -317,41 +318,32 @@ if __name__ == "__main__":
                     avg_return = random_result["total_return"]
                     avg_mdd = random_result["max_drawdown"]
                     avg_trade_count = random_result["sell_count"]
-                    figs = random_result["figs"]
-                    random_results = {}
-                    for i, fig in enumerate(figs, 1):
+                    for i, fig in enumerate(random_result["figs"], 1):
                         random_results[f"random_{i}"] = {"total_return": avg_return, "max_drawdown": avg_mdd, "trade_count": avg_trade_count, "fig": fig}
                 except Exception as e:
                     print(f"[WARN] Random-start 測試失敗：{e}")
 
-                # === 上傳固定五年測試結果 ===
+                # 上傳固定測試
                 if upload_wandb and len(fixed_results) > 0:
-                    avg_return_fixed = np.mean([v["total_return"] for v in fixed_results.values()])
-                    avg_mdd_fixed = np.mean([v["max_drawdown"] for v in fixed_results.values()])
-                    avg_trades_fixed = np.mean([v["trade_count"] for v in fixed_results.values()])
                     wandb.log({
-                        "test_fixed/mean_return": avg_return_fixed,
-                        "test_fixed/mean_max_drawdown": avg_mdd_fixed,
-                        "test_fixed/mean_trade_count": avg_trades_fixed,
+                        "test_fixed/mean_return": np.mean([v["total_return"] for v in fixed_results.values()]),
+                        "test_fixed/mean_max_drawdown": np.mean([v["max_drawdown"] for v in fixed_results.values()]),
+                        "test_fixed/mean_trade_count": np.mean([v["trade_count"] for v in fixed_results.values()]),
                     }, step=total_ep)
                     imgs_fixed = [wandb.Image(v["fig"], caption=f"Fixed Test {y}") for y, v in fixed_results.items() if v.get("fig")]
                     if imgs_fixed:
                         wandb.log({"test_fixed/panel": imgs_fixed}, step=total_ep)
 
-                # === 上傳隨機五段測試結果 ===
+                # 上傳隨機測試
                 if upload_wandb and len(random_results) > 0:
-                    avg_return_rand = np.mean([v["total_return"] for v in random_results.values()])
-                    avg_mdd_rand = np.mean([v["max_drawdown"] for v in random_results.values()])
-                    avg_trades_rand = np.mean([v["trade_count"] for v in random_results.values()])
                     wandb.log({
-                        "test_random/mean_return": avg_return_rand,
-                        "test_random/mean_max_drawdown": avg_mdd_rand,
-                        "test_random/mean_trade_count": avg_trades_rand,
+                        "test_random/mean_return": np.mean([v["total_return"] for v in random_results.values()]),
+                        "test_random/mean_max_drawdown": np.mean([v["max_drawdown"] for v in random_results.values()]),
+                        "test_random/mean_trade_count": np.mean([v["trade_count"] for v in random_results.values()]),
                     }, step=total_ep)
                     imgs_rand = [wandb.Image(v["fig"], caption=f"Random Test {k}") for k, v in random_results.items() if v.get("fig")]
                     if imgs_rand:
                         wandb.log({"test_random/panel": imgs_rand}, step=total_ep)
-                # === 🔧 修改區域結束 ===
 
                 try:
                     tmp_ckpt.unlink(missing_ok=True)
