@@ -290,22 +290,45 @@ def run_test_once(
             first_value = df_trades["portfolio_value"].iloc[0]
             df_trades["return(%)"] = (df_trades["portfolio_value"] / first_value - 1) * 100
 
+        # === 交易成本版本的損益計算 ===
         df_trades["trade_profit"] = None
         df_trades["trade_return(%)"] = None
 
-        buy_price, buy_lots = None, None
+        # 每檔股票獨立追蹤持倉與平均成本
+        buy_info = {}  # {stock_id: (avg_price, total_lots)}
+        cost_rate = 0.001425  # 單邊手續費
+        tax_rate = 0.003*0.6  # 證交稅打6折
+
         for i, row in df_trades.iterrows():
+            sid = row["stock_id"]
+
+            # === BUY ===
             if row["action"] == "BUY":
-                buy_price = row["price"]
-                buy_lots = row["lots"]
-            elif row["action"] == "SELL_ALL" and buy_price is not None:
+                if sid in buy_info:
+                    old_price, old_lots = buy_info[sid]
+                    new_price, new_lots = row["price"], row["lots"]
+                    avg_price = (old_price * old_lots + new_price * new_lots) / (old_lots + new_lots)
+                    buy_info[sid] = (avg_price, old_lots + new_lots)
+                else:
+                    buy_info[sid] = (row["price"], row["lots"])
+
+            # === SELL_ALL ===
+            elif row["action"] == "SELL_ALL" and sid in buy_info:
+                buy_price, buy_lots = buy_info[sid]
                 sell_price = row["price"]
-                profit = (sell_price - buy_price) * buy_lots * 1000  # 單位元
-                trade_return = (sell_price / buy_price - 1) * 100
+
+                # === 加入手續費與稅 ===
+                buy_cost = buy_price * buy_lots * 1000 * cost_rate
+                sell_cost = sell_price * buy_lots * 1000 * (cost_rate + tax_rate)
+
+                profit = (sell_price - buy_price) * buy_lots * 1000 - buy_cost - sell_cost
+                trade_return = profit / (buy_price * buy_lots * 1000) * 100
+
                 df_trades.loc[i, "trade_profit"] = round(profit, 2)
                 df_trades.loc[i, "trade_return(%)"] = round(trade_return, 2)
-                # 清空 buy 狀態，避免跨股票混算
-                buy_price, buy_lots = None, None
+
+                # 清除該股票持倉紀錄
+                del buy_info[sid]
 
         df_trades.to_csv(out_path, index=False, encoding="utf-8-sig")
         print(f"[INFO] 交易紀錄已儲存：{out_path}")
