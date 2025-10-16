@@ -243,24 +243,28 @@ if __name__ == "__main__":
             metrics = compute_episode_metrics(daily_returns)
 
             reward_mean = float(np.mean(ep_rewards)) if len(ep_rewards) > 0 else 0.0
+            final_trade_counts = [i.get("trade_count", 0) for i in infos_list]
+            avg_trades_per_episode = float(np.mean(final_trade_counts))
+            days = metrics["days"]
+            avg_trades = (avg_trades_per_episode / max(1, days)) * 252.0  # 年化交易次數
             ep_mdd = min([i.get("mdd", 0.0) for i in infos_list]) * 100
-            avg_trades = float(np.mean(ep_trade_counts))
+
             total_ep = ep * n_envs
 
             # === Training metrics ===
             if upload_wandb and (ep % max(1, wandb_every) == 0):
                 wandb.log({
-                    "train/actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
-                    "train/critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
-                    "train/entropy": agent.entropy_log[-1] if agent.entropy_log else None,
-                    "train/avg_trade_count": avg_trades,
-                    "train/mdd%": ep_mdd,
-                    "train/policy_kl": logs.get("policy_kl"),
-                    "train/clip_eps_now": logs.get("clip_eps_now"),
-                    "train/kl_early_stop": logs.get("kl_early_stop"),
-                    "train/entropy_coef_now": logs.get("entropy_coef_now"),
-                    "eval/reward_mean": reward_mean,
-                    "eval/annualized_pct": float(metrics["annualized_pct"]),
+                    "1_train/actor_loss": agent.actor_loss_log[-1] if agent.actor_loss_log else None,
+                    "1_train/critic_loss": agent.critic_loss_log[-1] if agent.critic_loss_log else None,
+                    "1_train/entropy": agent.entropy_log[-1] if agent.entropy_log else None,
+                    "1_train/avg_trade_count": avg_trades,
+                    "1_train/mdd%": ep_mdd,
+                    "1_train/policy_kl": logs.get("policy_kl"),
+                    "1_train/clip_eps_now": logs.get("clip_eps_now"),
+                    "1_train/kl_early_stop": logs.get("kl_early_stop"),
+                    "1_train/entropy_coef_now": logs.get("entropy_coef_now"),
+                    "0_eval/reward_mean": reward_mean,
+                    "0_eval/annualized_pct": float(metrics["annualized_pct"]),
                 }, step=total_ep)
 
             # === Test section ===
@@ -326,9 +330,9 @@ if __name__ == "__main__":
                 # 上傳固定測試
                 if upload_wandb and len(fixed_results) > 0:
                     wandb.log({
-                        "test_fixed/mean_return": np.mean([v["total_return"] for v in fixed_results.values()]),
-                        "test_fixed/mean_max_drawdown": np.mean([v["max_drawdown"] for v in fixed_results.values()]),
-                        "test_fixed/mean_trade_count": np.mean([v["trade_count"] for v in fixed_results.values()]),
+                        "2_test_fixed/mean_return": np.mean([v["total_return"] for v in fixed_results.values()]),
+                        "2_test_fixed/mean_max_drawdown": np.mean([v["max_drawdown"] for v in fixed_results.values()]),
+                        "2_test_fixed/mean_trade_count": np.mean([v["trade_count"] for v in fixed_results.values()]),
                     }, step=total_ep)
                     imgs_fixed = [wandb.Image(v["fig"], caption=f"Fixed Test {y}") for y, v in fixed_results.items() if v.get("fig")]
                     if imgs_fixed:
@@ -337,9 +341,9 @@ if __name__ == "__main__":
                 # 上傳隨機測試
                 if upload_wandb and len(random_results) > 0:
                     wandb.log({
-                        "test_random/mean_return": np.mean([v["total_return"] for v in random_results.values()]),
-                        "test_random/mean_max_drawdown": np.mean([v["max_drawdown"] for v in random_results.values()]),
-                        "test_random/mean_trade_count": np.mean([v["trade_count"] for v in random_results.values()]),
+                        "3_test_random/mean_return": np.mean([v["total_return"] for v in random_results.values()]),
+                        "3_test_random/mean_max_drawdown": np.mean([v["max_drawdown"] for v in random_results.values()]),
+                        "3_test_random/mean_trade_count": np.mean([v["trade_count"] for v in random_results.values()]),
                     }, step=total_ep)
                     imgs_rand = [wandb.Image(v["fig"], caption=f"Random Test {k}") for k, v in random_results.items() if v.get("fig")]
                     if imgs_rand:
