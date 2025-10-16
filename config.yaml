@@ -39,7 +39,7 @@ data:
 environment:
   initial_cash: 200000
   lookback: 30
-  reward_mode: "strong_signal_return"   # "daily_return" | "total_profit" | "strong_signal_return" | "aggressive_signal_return"
+  reward_mode: "aggressive_signal_return"   # "daily_return" | "total_profit" | "strong_signal_return" | "aggressive_signal_return"
   action_mode: "discrete"
   max_holdings: 3
   qmax_per_trade: 10
