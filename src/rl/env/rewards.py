@@ -162,8 +162,7 @@ def aggressive_signal_return(env, action, side, p_close, t):
 
     # === 改 4: Drawdown penalty 保留但更平滑 ===
     dd_from_peak = (V_new - env.peak_value) / env.peak_value
-    if dd_from_peak < -0.2:
-        reward += dd_from_peak * 0.08   # 緩懲罰，保留防爆功能  # CHANGED
+    reward += torch.where(dd_from_peak < -0.2, dd_from_peak * 0.08, torch.zeros_like(dd_from_peak))
 
     # === 改 5: 加入 idle_penalty 抑制過久 HOLD ===
     if action == 0:  # HOLD
