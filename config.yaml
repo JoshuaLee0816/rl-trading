@@ -49,6 +49,8 @@ logging:
   trade_sample_freq: 1
   wandb_every: 1
   test_every: 25              # 每 N 個 outer-episode 跑一次 2020–2024 測試
+  test_start_ep: 200          # 從第幾集開始進行測試
+  test_every_later: 10        # 後期的密集測試
 
 
 ppo:

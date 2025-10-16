@@ -99,14 +99,16 @@ if __name__ == "__main__":
     log_cfg   = config.get("logging", {})
 
     n_episodes   = int(train_cfg["n_episodes"])
-    ckpt_freq    = int(train_cfg.get("ckpt_freq", 50))
-    max_ckpts    = int(train_cfg.get("max_ckpts", 5))
-    upload_wandb = bool(train_cfg.get("upload_wandb", False))
-    resume_from_best = bool(train_cfg.get("resume_from_best", False))
+    ckpt_freq    = int(train_cfg.get("ckpt_freq"))
+    max_ckpts    = int(train_cfg.get("max_ckpts"))
+    upload_wandb = bool(train_cfg.get("upload_wandb"))
+    resume_from_best = bool(train_cfg.get("resume_from_best"))
 
-    num_envs     = int(ppo_cfg.get("num_envs", 2))
-    wandb_every  = int(log_cfg.get("wandb_every", 10))
-    test_every   = int(log_cfg.get("test_every", train_cfg.get("test_every", 10)))
+    num_envs     = int(ppo_cfg.get("num_envs"))
+    wandb_every  = int(log_cfg.get("wandb_every"))
+    test_every   = int(log_cfg.get("test_every"))
+    test_every_later = int(log_cfg.get("test_every_later"))
+    test_start_ep = int(log_cfg.get("test_start_ep"))
 
     init_cash      = env_cfg["initial_cash"]
     lookback       = env_cfg["lookback"]
@@ -268,91 +270,98 @@ if __name__ == "__main__":
                 }, step=total_ep)
 
             # === Test section ===
-            if upload_wandb and (ep % max(1, test_every) == 0):
-                tmp_ckpt = run_dir / f"eval_tmp_ep{ep}.pt"
-                torch.save({"actor": agent.actor.state_dict(), "critic": agent.critic.state_dict()}, tmp_ckpt)
-                with open(ROOT / "config.yaml", "r", encoding="utf-8") as _f:
-                    _cfg_for_test = yaml.safe_load(_f)
+            if upload_wandb and (ep >= test_start_ep):
+                # 若訓練進入後期，縮短測試間隔
+                if ep > test_start_ep * 5:
+                    test_interval = test_every_later
+                else:
+                    test_interval = test_every #原版
+                
+                if (ep % test_interval == 0):
+                    tmp_ckpt = run_dir / f"eval_tmp_ep{ep}.pt"
+                    torch.save({"actor": agent.actor.state_dict(), "critic": agent.critic.state_dict()}, tmp_ckpt)
+                    with open(ROOT / "config.yaml", "r", encoding="utf-8") as _f:
+                        _cfg_for_test = yaml.safe_load(_f)
 
-                years = (2020, 2021, 2022, 2023, 2024)
-                test_cfg = _cfg_for_test.get("testing", {})
-                test_policy = test_cfg.get("policy", "argmax")
-                test_conf_threshold = float(test_cfg.get("conf_threshold", 0.75))
-                test_n_runs = int(test_cfg.get("n_runs", 5))
+                    years = (2020, 2021, 2022, 2023, 2024)
+                    test_cfg = _cfg_for_test.get("testing", {})
+                    test_policy = test_cfg.get("policy", "argmax")
+                    test_conf_threshold = float(test_cfg.get("conf_threshold", 0.75))
+                    test_n_runs = int(test_cfg.get("n_runs", 5))
 
-                # 固定五年測試
-                fixed_results = {}
-                for y in years:
-                    data_path = _resolve_test_path(ROOT, _cfg_for_test, y)
-                    if not data_path.exists():
-                        print(f"[WARN] 找不到 {y} 的測試檔案：{data_path}")
-                        continue
+                    # 固定五年測試
+                    fixed_results = {}
+                    for y in years:
+                        data_path = _resolve_test_path(ROOT, _cfg_for_test, y)
+                        if not data_path.exists():
+                            print(f"[WARN] 找不到 {y} 的測試檔案：{data_path}")
+                            continue
+                        try:
+                            tr, mdd, _, _, fig, _, sell_count = run_test_once(
+                                actor_path=str(tmp_ckpt),
+                                data_path=str(data_path),
+                                config_path=str(ROOT / "config.yaml"),
+                                plot=True,
+                                save_trades=True,
+                                tag=f"{y}_Fixed_ep{ep}",
+                                verbose=True,
+                                return_fig=True,
+                                policy=test_policy,
+                                conf_threshold=test_conf_threshold,
+                                initial_cash=100000,
+                            )
+                            fixed_results[y] = {"total_return": tr, "max_drawdown": mdd, "trade_count": sell_count, "fig": fig}
+                        except Exception as e:
+                            print(f"[WARN] 固定年度測試 {y} 失敗：{e}")
+
+                    # 隨機測試
+                    random_results = {}
                     try:
-                        tr, mdd, _, _, fig, _, sell_count = run_test_once(
+                        random_result = run_test_random_start(
                             actor_path=str(tmp_ckpt),
-                            data_path=str(data_path),
                             config_path=str(ROOT / "config.yaml"),
-                            plot=True,
+                            n_runs=test_n_runs,
                             save_trades=True,
-                            tag=f"{y}_Fixed_ep{ep}",
+                            plot=True,
+                            tag=f"Random_ep{ep}",
                             verbose=True,
-                            return_fig=True,
                             policy=test_policy,
                             conf_threshold=test_conf_threshold,
-                            initial_cash=100000,
                         )
-                        fixed_results[y] = {"total_return": tr, "max_drawdown": mdd, "trade_count": sell_count, "fig": fig}
+                        avg_return = random_result["total_return"]
+                        avg_mdd = random_result["max_drawdown"]
+                        avg_trade_count = random_result["sell_count"]
+                        for i, fig in enumerate(random_result["figs"], 1):
+                            random_results[f"random_{i}"] = {"total_return": avg_return, "max_drawdown": avg_mdd, "trade_count": avg_trade_count, "fig": fig}
                     except Exception as e:
-                        print(f"[WARN] 固定年度測試 {y} 失敗：{e}")
+                        print(f"[WARN] Random-start 測試失敗：{e}")
 
-                # 隨機測試
-                random_results = {}
-                try:
-                    random_result = run_test_random_start(
-                        actor_path=str(tmp_ckpt),
-                        config_path=str(ROOT / "config.yaml"),
-                        n_runs=test_n_runs,
-                        save_trades=True,
-                        plot=True,
-                        tag=f"Random_ep{ep}",
-                        verbose=True,
-                        policy=test_policy,
-                        conf_threshold=test_conf_threshold,
-                    )
-                    avg_return = random_result["total_return"]
-                    avg_mdd = random_result["max_drawdown"]
-                    avg_trade_count = random_result["sell_count"]
-                    for i, fig in enumerate(random_result["figs"], 1):
-                        random_results[f"random_{i}"] = {"total_return": avg_return, "max_drawdown": avg_mdd, "trade_count": avg_trade_count, "fig": fig}
-                except Exception as e:
-                    print(f"[WARN] Random-start 測試失敗：{e}")
+                    # 上傳固定測試
+                    if upload_wandb and len(fixed_results) > 0:
+                        wandb.log({
+                            "2_test_fixed/mean_return": np.mean([v["total_return"] for v in fixed_results.values()]),
+                            "2_test_fixed/mean_max_drawdown": np.mean([v["max_drawdown"] for v in fixed_results.values()]),
+                            "2_test_fixed/mean_trade_count": np.mean([v["trade_count"] for v in fixed_results.values()]),
+                        }, step=total_ep)
+                        imgs_fixed = [wandb.Image(v["fig"], caption=f"Fixed Test {y}") for y, v in fixed_results.items() if v.get("fig")]
+                        if imgs_fixed:
+                            wandb.log({"2_test_fixed/panel": imgs_fixed}, step=total_ep)
 
-                # 上傳固定測試
-                if upload_wandb and len(fixed_results) > 0:
-                    wandb.log({
-                        "2_test_fixed/mean_return": np.mean([v["total_return"] for v in fixed_results.values()]),
-                        "2_test_fixed/mean_max_drawdown": np.mean([v["max_drawdown"] for v in fixed_results.values()]),
-                        "2_test_fixed/mean_trade_count": np.mean([v["trade_count"] for v in fixed_results.values()]),
-                    }, step=total_ep)
-                    imgs_fixed = [wandb.Image(v["fig"], caption=f"Fixed Test {y}") for y, v in fixed_results.items() if v.get("fig")]
-                    if imgs_fixed:
-                        wandb.log({"2_test_fixed/panel": imgs_fixed}, step=total_ep)
+                    # 上傳隨機測試
+                    if upload_wandb and len(random_results) > 0:
+                        wandb.log({
+                            "3_test_random/mean_return": np.mean([v["total_return"] for v in random_results.values()]),
+                            "3_test_random/mean_max_drawdown": np.mean([v["max_drawdown"] for v in random_results.values()]),
+                            "3_test_random/mean_trade_count": np.mean([v["trade_count"] for v in random_results.values()]),
+                        }, step=total_ep)
+                        imgs_rand = [wandb.Image(v["fig"], caption=f"Random Test {k}") for k, v in random_results.items() if v.get("fig")]
+                        if imgs_rand:
+                            wandb.log({"3_test_random/panel": imgs_rand}, step=total_ep)
 
-                # 上傳隨機測試
-                if upload_wandb and len(random_results) > 0:
-                    wandb.log({
-                        "3_test_random/mean_return": np.mean([v["total_return"] for v in random_results.values()]),
-                        "3_test_random/mean_max_drawdown": np.mean([v["max_drawdown"] for v in random_results.values()]),
-                        "3_test_random/mean_trade_count": np.mean([v["trade_count"] for v in random_results.values()]),
-                    }, step=total_ep)
-                    imgs_rand = [wandb.Image(v["fig"], caption=f"Random Test {k}") for k, v in random_results.items() if v.get("fig")]
-                    if imgs_rand:
-                        wandb.log({"3_test_random/panel": imgs_rand}, step=total_ep)
-
-                try:
-                    tmp_ckpt.unlink(missing_ok=True)
-                except Exception:
-                    pass
+                    try:
+                        tmp_ckpt.unlink(missing_ok=True)
+                    except Exception:
+                        pass
 
             rss = proc.memory_info().rss / 1024**3
             print(f"[MEM] ep={ep} | RSS={rss:.2f} GB ")
