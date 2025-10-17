@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 def add_moving_averages(df: pd.DataFrame, windows=[5, 20, 34, 60]) -> pd.DataFrame:
     """對每一檔股票的 close 欄位計算移動平均 (MA)，並新增欄位。"""
@@ -83,5 +84,44 @@ def add_kd(df: pd.DataFrame, n: int = 9, k_period: int = 3, d_period: int = 3) -
 
         new_cols[f"{sid}_K"] = K
         new_cols[f"{sid}_D"] = D
+
+    return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+def add_regime_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    新增兩個 regime 指標：
+    1. <sid>_vol20_z : 20 日對數報酬標準差（波動率），經 rolling z-score 標準化。
+    2. <sid>_trend_ratio_z : MA34 與 MA60 的相對差距（趨勢強度），經 rolling z-score 標準化。
+    """
+    import numpy as np
+    close_cols = [c for c in df.columns if c.endswith("_close")]
+    new_cols = {}
+
+    for col in close_cols:
+        sid = col.split("_")[0]
+
+        # === (1) 波動率 regime ===
+        close = df[col].astype(float).replace(0, np.nan)
+        log_ret = np.log(close / close.shift(1))    # ✅ 改：直接算 log return，不再用 apply
+        vol20 = log_ret.rolling(window=20, min_periods=10).std()
+
+        # rolling 標準化（過去一年窗口）
+        mean_vol = vol20.rolling(window=252, min_periods=50).mean()
+        std_vol = vol20.rolling(window=252, min_periods=50).std()
+        vol20_z = (vol20 - mean_vol) / (std_vol + 1e-8)
+        new_cols[f"{sid}_vol20_z"] = vol20_z.shift(1)
+
+        # === (2) 趨勢 regime ===
+        ma34_col = f"{sid}_MA34"
+        ma60_col = f"{sid}_MA60"
+        if ma34_col in df.columns and ma60_col in df.columns:
+            ma34 = df[ma34_col].astype(float)
+            ma60 = df[ma60_col].astype(float)
+            trend_ratio = (ma34 - ma60) / (ma60 + 1e-8)
+
+            mean_trend = trend_ratio.rolling(window=252, min_periods=50).mean()
+            std_trend = trend_ratio.rolling(window=252, min_periods=50).std()
+            trend_ratio_z = (trend_ratio - mean_trend) / (std_trend + 1e-8)
+            new_cols[f"{sid}_trend_ratio_z"] = trend_ratio_z.shift(1)
 
     return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)

@@ -36,6 +36,7 @@ from src.features.indicators import (
     add_volume_moving_averages,
     add_macd,
     add_kd,
+    add_regime_features,
 )
 
 
@@ -152,6 +153,7 @@ def main():
     feat_df = add_volume_moving_averages(feat_df, windows=VOLUME_MA_WINDOWS)
     feat_df = add_macd(feat_df, *MACD_PARAMS)
     feat_df = add_kd(feat_df, *KD_PARAMS)
+    feat_df = add_regime_features(feat_df)  
 
     # 丟掉 warm-up
     warmup = max(MA_WINDOWS + [RSI_WINDOW])

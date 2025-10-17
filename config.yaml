@@ -31,10 +31,10 @@ data:
     "2022": "full_300/walk_forward/WF_test_2022_full_300.parquet"
     "2023": "full_300/walk_forward/WF_test_2023_full_300.parquet"
     "2024": "full_300/walk_forward/WF_test_2024_full_300.parquet"
-  features: ["open", "high", "low", "close", "volume", "MA5", "MA34", "MA60", "VMA20", "VMA60", "rsi14"]
+  features: ["open", "high", "low", "close", "volume", "MA5", "MA34", "MA60", "VMA20", "VMA60", "rsi14","vol20_z",trend_ratio_z"]
   # features: ['open','high','low','close','volume','cash_dividend','stock_dividend',
   #            'MA5','MA20','MA34','MA60','MA120','VMA20','VMA60','rsi14',
-  #            'macd','macd_signal','macd_hist']
+  #            'macd','macd_signal','macd_hist','vol20_z',trend_ratio_z']
 
 environment:
   initial_cash: 200000
