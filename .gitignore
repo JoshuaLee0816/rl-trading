@@ -1,36 +1,39 @@
-# --- Python 通用 ---
+# Python 通用
 __pycache__/
 *.py[cod]
 *.egg-info/
 .ipynb_checkpoints/
-*.ipynb # 若不想版控 .ipynb
+*.ipynb                # 若不想版控 Jupyter Notebook
 
-# --- 虛擬環境 ---
+# 虛擬環境
 .venv/
 venv/
 
-# --- 作業系統 / 編輯器 ---
+# 作業系統 / 編輯器暫存檔
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
 
-# --- Secrets / Token ---
+# Secrets / Token / Cache
 .env
 .cache/
 *.key
 *.pem
 
-# --- 資料、衍生檔 ---
+# 資料 / 衍生檔
 data/raw/
-# 若 processed 也會很大，可加上（必要時移除）
-data/processed/
+# 若 processed 太大不想進版控，可加上這行（必要時移除）
+# data/processed/
+*.parquet
+*.csv
+*.png
+*.jpg
 
-# --- 日誌 ---
+# 日誌 / 訓練輸出
 logs/
 *.log
-*.csv
-
-# Ignore wandb logs
 wandb/
 
+# 測試輸出資料夾
+src/rl/test/testing_output/
