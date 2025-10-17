@@ -1,6 +1,0 @@
-<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path fill-rule="evenodd" clip-rule="evenodd" d="M14 4H8C5.79086 4 4 5.79086 4 8V40C4 42.2091 5.79086 44 8 44H14V40H8L8 8H14V4Z" fill="#050038" data-stroke-as-fill-style="placeholder"/>
-<line x1="14" y1="18" x2="36" y2="18" stroke="#050038" stroke-width="4" data-stroke-style="placeholder"/>
-<line x1="14" y1="24" x2="36" y2="24" stroke="#050038" stroke-width="4" data-stroke-style="placeholder"/>
-<line x1="14" y1="30" x2="30" y2="30" stroke="#050038" stroke-width="4" data-stroke-style="placeholder"/>
-</svg>
