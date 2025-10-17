@@ -6,7 +6,8 @@ import sys
 PROJ_ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(PROJ_ROOT))
 
-MODE = "full_300"   # === _300 方便區分 ===
+#MODE = "full_300"   # === _300 方便區分 ===
+MODE = "full_200"   # === _300 方便區分 ===
 
 RAW_FILE = PROJ_ROOT / "data" / "raw" / "ALL_RAW_DATA_2015_2024_wide.csv"
 OUT_DIR = PROJ_ROOT / "data" / "processed" / MODE
@@ -124,6 +125,7 @@ def main():
             turnover = pre_clean_df[f"{sid}_close"] * pre_clean_df[f"{sid}_volume"]
             avg_turnover[sid] = turnover.mean(skipna=True)
 
+    """
     # === 挑前300檔 ===
     top300 = sorted(avg_turnover.items(), key=lambda x: x[1], reverse=True)[:300]
     top300_ids = {sid for sid, _ in top300}
@@ -138,6 +140,30 @@ def main():
     # === 只保留前300檔 ===
     clean_frames = []
     for sid in top300_ids:
+        cols = [f"{sid}_open", f"{sid}_high", f"{sid}_low", f"{sid}_close",
+                f"{sid}_volume", f"{sid}_cash_dividend", f"{sid}_stock_dividend"]
+        sub_cols = [c for c in cols if c in df.columns]
+        sub = df.reindex(columns=sub_cols).copy()
+        sub = sub.ffill().bfill()
+        clean_frames.append(sub)
+
+    clean_df = pd.concat(clean_frames, axis=1).sort_index()
+    """
+    
+    # === 挑前200檔 ===
+    top200 = sorted(avg_turnover.items(), key=lambda x: x[1], reverse=True)[:200]
+    top200_ids = {sid for sid, _ in top200}
+    print(f"[INFO] selected top {len(top200_ids)} stocks by avg turnover")
+
+    # === 存出 Top200 股票清單 ===
+    top200_df = pd.DataFrame(top200, columns=["stock_id", "avg_turnover"])
+    top200_file = OUT_DIR / f"top200_list_{MODE}.csv"
+    top200_df.to_csv(top200_file, index=False)
+    print(f"[OK] saved top200 list -> {top200_file}")
+
+    # === 只保留前200檔 ===
+    clean_frames = []
+    for sid in top200_ids:
         cols = [f"{sid}_open", f"{sid}_high", f"{sid}_low", f"{sid}_close",
                 f"{sid}_volume", f"{sid}_cash_dividend", f"{sid}_stock_dividend"]
         sub_cols = [c for c in cols if c in df.columns]
